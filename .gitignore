@@ -1,0 +1,42 @@
+# ================================
+# Pamsimas Project - Root .gitignore
+# ================================
+
+# Dependencies
+node_modules/
+
+# Environment variables (CRITICAL - never commit these!)
+.env
+.env.local
+.env.production
+
+# Build output
+dist/
+build/
+
+# Drizzle migrations meta
+drizzle/meta/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Uploads (local development only)
+uploads/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Optional: lock files (uncomment if you want to ignore them)
+# package-lock.json
