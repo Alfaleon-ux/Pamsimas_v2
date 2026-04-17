@@ -10,7 +10,14 @@ if (!connectionString) {
 }
 
 // For query purposes (connection pool)
-const queryClient = postgres(connectionString);
+// Supabase requires SSL and uses connection pooler on port 6543
+const queryClient = postgres(connectionString, {
+  ssl: { rejectUnauthorized: false },
+  max: 10, // Max connections in the pool
+  idle_timeout: 20, // Close idle connections after 20s
+  connect_timeout: 10, // Connection timeout 10s
+  prepare: false, // Required for Supabase Transaction pooler mode
+});
 
 export const db = drizzle(queryClient, { schema });
 

@@ -4,7 +4,7 @@
 // --- 1. API CLIENT & STORAGE ---
 
 // Backend API base URL
-const API_BASE = 'http://localhost:3000';
+const API_BASE = '';  // Empty = relative URL (same domain on Vercel)
 
 /**
  * Authenticated fetch wrapper.
@@ -2112,37 +2112,14 @@ function renderAdminTagihan(container) {
     const filename = `Invoice_${entry.member.id}_${monthName(entry.month)}_${entry.year}.pdf`;
 
     try {
-      // Try PyMuPDF backend first
-      const res = await fetch('http://localhost:5050/api/invoice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
+      // Client-side PDF generation using jsPDF
+      const doc = generateReceiptPDF(payload);
+      doc.save(filename);
       showToast(`PDF berhasil diunduh: ${filename}`);
-    } catch (err) {
-      console.warn('PyMuPDF server unavailable, falling back to jsPDF:', err.message);
-      // Fallback to client-side jsPDF
-      try {
-        const doc = generateReceiptPDF(payload);
-        doc.save(filename);
-        showToast(`PDF diunduh (fallback): ${filename}`);
-      } catch (e2) {
-        showToast('Gagal membuat PDF. Pastikan server invoice aktif.', 'error');
-        return;
-      }
+    } catch (e) {
+      console.error('PDF generation failed:', e);
+      showToast('Gagal membuat PDF.', 'error');
+      return;
     }
 
     logAction('pdf', `Download PDF ${entry.member.fullName} (${monthName(entry.month)} ${entry.year})`);
