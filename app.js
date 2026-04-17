@@ -1,6 +1,59 @@
 /* Pamsimas Water Utility Management - Refactored Vanilla JS localStorage app */
+/* NOTE: Billing, Payments, Dashboard, Reports, and Meter-Reading Review now use Backend API */
 
-// --- 1. STORAGE & DATA MODELS ---
+// --- 1. API CLIENT & STORAGE ---
+
+// Backend API base URL
+const API_BASE = 'http://localhost:3000';
+
+/**
+ * Authenticated fetch wrapper.
+ * All requests include credentials (session cookies from Better Auth).
+ * Returns the parsed JSON response body.
+ */
+async function apiFetch(path, options = {}) {
+  const { body, method = 'GET', headers = {} } = options;
+  const config = {
+    method,
+    credentials: 'include',
+    headers: { ...headers },
+  };
+  if (body) {
+    config.headers['Content-Type'] = 'application/json';
+    config.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(`${API_BASE}${path}`, config);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json.error || json.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return json;
+}
+
+/**
+ * Auth helpers using Better Auth endpoints.
+ */
+async function apiLogin(email, password) {
+  return apiFetch('/api/auth/sign-in/email', {
+    method: 'POST',
+    body: { email, password },
+  });
+}
+
+async function apiLogout() {
+  return apiFetch('/api/auth/sign-out', { method: 'POST' });
+}
+
+async function apiGetSession() {
+  try {
+    return await apiFetch('/api/auth/get-session');
+  } catch {
+    return null;
+  }
+}
+
+// localStorage keys (still used for non-migrated modules: members, spk, officer panel)
 const STORAGE = {
   admin: 'pamsimas_admin',
   users: 'pamsimas_users',

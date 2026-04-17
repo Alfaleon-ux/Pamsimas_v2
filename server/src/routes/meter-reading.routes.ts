@@ -23,6 +23,7 @@ router.get("/", requireRole("admin"), async (req, res) => {
     const readings = await meterReadingService.getReadings(m, y);
     res.json({ data: readings });
   } catch (error: any) {
+    console.error("[MeterReading] GET /:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -53,6 +54,7 @@ router.get("/tasks", async (req, res) => {
       },
     });
   } catch (error: any) {
+    console.error("[MeterReading] GET /tasks:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -106,6 +108,7 @@ router.post("/", upload.single("photo"), async (req, res) => {
 
     res.status(201).json({ data: reading });
   } catch (error: any) {
+    console.error("[MeterReading] POST /:", error);
     res.status(400).json({ error: error.message });
   }
 });

@@ -22,6 +22,7 @@ router.get("/", async (req, res) => {
     const payments = await paymentService.getPayments(m, y);
     res.json({ data: payments });
   } catch (error: any) {
+    console.error("[Payment] GET /:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -39,6 +40,7 @@ router.get("/:id", async (req, res) => {
     }
     res.json({ data: receipt });
   } catch (error: any) {
+    console.error("[Payment] GET /:id:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -81,6 +83,7 @@ router.post("/", async (req, res) => {
 
     res.status(201).json({ data: payment });
   } catch (error: any) {
+    console.error("[Payment] POST /:", error);
     res.status(400).json({ error: error.message });
   }
 });

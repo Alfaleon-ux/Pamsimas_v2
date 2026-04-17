@@ -44,6 +44,7 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (error: any) {
+    console.error("[Billing] GET /:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -71,6 +72,7 @@ router.get("/:memberId", async (req, res) => {
 
     res.json({ data: bill });
   } catch (error: any) {
+    console.error("[Billing] GET /:memberId:", error);
     res.status(500).json({ error: error.message });
   }
 });

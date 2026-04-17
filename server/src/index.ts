@@ -24,9 +24,13 @@ const PORT = Number(process.env.PORT) || 3000;
 // ---------------------
 // CORS
 // ---------------------
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",")
+  : ["http://localhost:5500", "http://127.0.0.1:5500"];
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5500",
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
