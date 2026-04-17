@@ -34,10 +34,10 @@ async function apiFetch(path, options = {}) {
 /**
  * Auth helpers using Better Auth endpoints.
  */
-async function apiLogin(email, password) {
-  return apiFetch('/api/auth/sign-in/email', {
+async function apiLogin(username, password) {
+  return apiFetch('/api/auth/sign-in/username', {
     method: 'POST',
-    body: { email, password },
+    body: { username, password },
   });
 }
 
@@ -105,19 +105,19 @@ const formatDate = (isoString) => {
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
   if (!container) return;
-  
+
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">
     <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
     <span>${message}</span>
   </div>`;
-  
+
   container.appendChild(toast);
-  
+
   // Trigger reflow & slide in
   setTimeout(() => toast.classList.add('show'), 10);
-  
+
   // Remove after 3s
   setTimeout(() => {
     toast.classList.remove('show');
@@ -181,199 +181,402 @@ function monthName(m) {
  */
 function generateReceiptPDF(data) {
   const { jsPDF } = window.jspdf;
-  
-  // Thermal receipt size: 80mm wide, dynamic height
-  const pageW = 80;
-  let estimatedH = 200; // Will be enough for most receipts
-  const doc = new jsPDF({ unit: 'mm', format: [pageW, estimatedH] });
-  
-  const mL = 5; // left margin
-  const mR = pageW - 5; // right margin x-coordinate
+
+  // A4 portrait: 210mm x 297mm
+  const pageW = 210;
+  const pageH = 297;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+  const mL = 20; // left margin
+  const mR = pageW - 20; // right margin x
   const cX = pageW / 2; // center x
-  const contentW = pageW - 10; // usable width
-  let y = 8; // current y cursor
-  
-  // --- Colors ---
-  const darkBlue = [15, 23, 41];
-  const blue = [59, 130, 246];
-  const gray = [100, 116, 139];
-  const darkGray = [30, 41, 59];
-  const green = [16, 185, 129];
-  const white = [255, 255, 255];
-  const black = [0, 0, 0];
-  
-  // --- Background ---
-  doc.setFillColor(250, 250, 252);
-  doc.rect(0, 0, pageW, estimatedH, 'F');
-  
-  // --- Header Band ---
-  doc.setFillColor(...blue);
-  doc.rect(0, 0, pageW, 28, 'F');
-  
-  // Header Text
+  const contentW = pageW - 40; // usable width
+  let y = 0;
+
+  // --- Color Palette (ocean/water blue theme) ---
+  const deepBlue    = [26, 54, 93];    // #1a365d
+  const medBlue     = [44, 82, 130];   // #2c5282
+  const brandBlue   = [59, 130, 246];  // #3b82f6
+  const lightBlue   = [66, 153, 225];  // #4299e1
+  const softBlue    = [190, 227, 248]; // #bee3f8
+  const paleBlue    = [235, 248, 255]; // #ebf8ff
+  const white       = [255, 255, 255];
+  const offWhite    = [247, 250, 252];
+  const darkText    = [26, 32, 44];    // #1a202c
+  const grayText    = [113, 128, 150]; // #718096
+  const lightGray   = [226, 232, 240]; // #e2e8f0
+  const green       = [56, 161, 105];  // #38a169
+  const red         = [229, 62, 62];   // #e53e3e
+
+  // ===== HELPER: Draw decorative wave at a given Y =====
+  const drawWaveTop = (startY, height, color, opacity) => {
+    doc.setFillColor(...color);
+    // Main rectangle band
+    doc.rect(0, startY, pageW, height, 'F');
+    // Wavy bottom edge using multiple ellipses to create organic wave
+    const waveH = 12;
+    doc.setFillColor(...color);
+    // Create a series of overlapping circles for wave effect
+    for (let x = -20; x <= pageW + 20; x += 30) {
+      doc.ellipse(x, startY + height, 25, waveH, 'F');
+    }
+    // Overlay white to cut the bottom of the wave
+    doc.setFillColor(...white);
+    doc.rect(0, startY + height + waveH - 3, pageW, waveH + 5, 'F');
+  };
+
+  const drawWaveBottom = (startY, color) => {
+    // Wavy top edge
+    doc.setFillColor(...color);
+    const waveH = 14;
+    for (let x = -15; x <= pageW + 15; x += 28) {
+      doc.ellipse(x, startY, 24, waveH, 'F');
+    }
+    // Fill everything below
+    doc.rect(0, startY, pageW, pageH - startY, 'F');
+  };
+
+  // ===== BACKGROUND =====
+  doc.setFillColor(...white);
+  doc.rect(0, 0, pageW, pageH, 'F');
+
+  // ===== TOP WAVE HEADER =====
+  // Deep blue band with wave
+  doc.setFillColor(...deepBlue);
+  doc.rect(0, 0, pageW, 52, 'F');
+  // Lighter wave overlay
+  doc.setFillColor(...medBlue);
+  for (let x = -10; x <= pageW + 10; x += 32) {
+    doc.ellipse(x, 52, 28, 14, 'F');
+  }
+  // White cleanup below wave
+  doc.setFillColor(...white);
+  doc.rect(0, 62, pageW, 10, 'F');
+  // Soft blue accent wave
+  doc.setFillColor(...softBlue);
+  for (let x = -5; x <= pageW + 5; x += 35) {
+    doc.ellipse(x, 56, 22, 8, 'F');
+  }
+  doc.setFillColor(...white);
+  doc.rect(0, 61, pageW, 10, 'F');
+
+  // ===== LOGO & BRANDING =====
+  y = 16;
+  // Water drop icon (simulated with circle and triangle)
+  doc.setFillColor(...lightBlue);
+  doc.circle(38, y + 6, 10, 'F');
+  doc.setFillColor(...white);
+  doc.circle(38, y + 6, 7.5, 'F');
+  doc.setFillColor(...lightBlue);
+  // Small water droplet inside
+  doc.circle(38, y + 5, 3, 'F');
+  doc.setFillColor(...white);
+  doc.circle(38, y + 4.5, 1.5, 'F');
+
+  // Organization name
   doc.setTextColor(...white);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('PAMSIMAS', cX, y, { align: 'center' });
-  y += 4.5;
-  doc.setFontSize(7.5);
+  doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text('Penyediaan Air Minum & Sanitasi', cX, y, { align: 'center' });
-  y += 3.5;
+  doc.text('PAMSIMAS', 35, y + 17, { align: 'center' });
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('DUSUN PILANG', cX, y, { align: 'center' });
-  y += 4;
-  doc.setFontSize(6);
+  doc.text('DUSUN PILANG', 35, y + 22, { align: 'center' });
+
+  // "INVOICE" title - right side
+  doc.setFontSize(32);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...softBlue);
+  doc.text('INVOICE', mR, y + 4, { align: 'right' });
+
+  // Invoice metadata below title
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Desa Pilang, Kec. Wonoayu, Kab. Sidoarjo', cX, y, { align: 'center' });
-  y += 3;
-  doc.text('Hubungi Admin: 0812-xxxx-xxxx', cX, y, { align: 'center' });
-  y += 5;
-  
-  // --- Divider (dashed) ---
-  const drawDashedLine = (yPos) => {
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineDashPattern([1.5, 1], 0);
-    doc.line(mL, yPos, mR, yPos);
-    doc.setLineDashPattern([], 0);
+  doc.setTextColor(...white);
+  const invoiceNoText = `Invoice No : ${data.invoiceId || '-'}`;
+  const invoiceDateText = `Invoice Date : ${data.isPaid && data.paidAt ? formatDate(data.paidAt) : new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}`;
+  const periodText = `Periode : ${monthName(data.month)} ${data.year}`;
+  doc.text(invoiceNoText, mR, y + 12, { align: 'right' });
+  doc.text(invoiceDateText, mR, y + 17, { align: 'right' });
+  doc.text(periodText, mR, y + 22, { align: 'right' });
+
+  // ===== MAIN CONTENT AREA =====
+  y = 72;
+
+  // --- Table Header ---
+  const colX = {
+    desc: mL,
+    price: mL + contentW * 0.50,
+    qty: mL + contentW * 0.68,
+    total: mL + contentW * 0.82
   };
-  
-  // --- Document Type Label ---
-  y += 2;
-  const docType = data.isPaid ? 'KWITANSI PEMBAYARAN' : 'TAGIHAN / INVOICE';
-  doc.setFillColor(240, 244, 248);
-  doc.roundedRect(mL, y - 3, contentW, 8, 1.5, 1.5, 'F');
-  doc.setFontSize(8);
+
+  // Table header background
+  doc.setFillColor(...deepBlue);
+  doc.rect(mL, y, contentW, 10, 'F');
+
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...darkBlue);
-  doc.text(docType, cX, y + 1.5, { align: 'center' });
-  y += 9;
-  
-  // --- Transaction Info ---
-  const addRow = (label, value, isBold = false) => {
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...gray);
-    doc.text(label, mL, y);
-    doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-    doc.setTextColor(...darkBlue);
-    doc.text(value, mR, y, { align: 'right' });
-    y += 4;
-  };
-  
-  addRow('No. Referensi', data.invoiceId || '-');
-  addRow('Tanggal', data.isPaid && data.paidAt ? formatDate(data.paidAt) : new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }));
-  
-  drawDashedLine(y);
-  y += 4;
-  
-  // --- Customer Info ---
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...blue);
-  doc.text('DATA PELANGGAN', mL, y);
-  y += 4.5;
-  
-  addRow('Nama', data.memberName, true);
-  addRow('ID Pelanggan', data.memberId);
-  addRow('Blok / Zona', data.zone);
-  if (data.address) addRow('Alamat', data.address.length > 28 ? data.address.substring(0, 28) + '...' : data.address);
-  
-  drawDashedLine(y);
-  y += 4;
-  
-  // --- Usage Details ---
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...blue);
-  doc.text('DETAIL PEMAKAIAN', mL, y);
-  y += 4.5;
-  
-  addRow('Periode', `${monthName(data.month)} ${data.year}`, true);
-  addRow('Meteran Awal', `${data.prevReading} m³`);
-  addRow('Meteran Akhir', `${data.currentReading} m³`);
-  addRow('Total Pemakaian', `${data.volume} m³`, true);
-  
-  drawDashedLine(y);
-  y += 4;
-  
-  // --- Cost Breakdown ---
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...blue);
-  doc.text('RINCIAN BIAYA', mL, y);
-  y += 4.5;
-  
-  addRow(`Biaya Air (${data.volume} m³)`, formatRp(data.biayaAir));
-  addRow('Biaya Beban/Perawatan', formatRp(data.biayaBeban));
-  
+  doc.setTextColor(...white);
+  doc.text('Deskripsi Tagihan', colX.desc + 4, y + 7);
+  doc.text('Harga', colX.price + 2, y + 7);
+  doc.text('Vol.', colX.qty + 4, y + 7);
+  doc.text('Total', colX.total + 2, y + 7);
+  y += 10;
+
+  // --- Table Rows ---
+  const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+
+  const tableRows = [];
+
+  // Row 1: Water usage
+  tableRows.push({
+    desc: `Pemakaian Air Bersih`,
+    detail: `Meteran: ${data.prevReading} → ${data.currentReading} m³`,
+    price: formatRp(rate) + '/m³',
+    qty: `${data.volume} m³`,
+    total: formatRp(data.biayaAir)
+  });
+
+  // Row 2: Admin/maintenance fee
+  tableRows.push({
+    desc: 'Biaya Beban / Perawatan',
+    detail: 'Biaya tetap bulanan',
+    price: formatRp(data.biayaBeban),
+    qty: '1',
+    total: formatRp(data.biayaBeban)
+  });
+
+  // Row 3: Installment (if any)
   if (data.biayaCicilan > 0 && data.cicilanInfo) {
-    addRow(`Cicilan Pemasangan (${data.cicilanInfo.bulanKe}/${data.cicilanInfo.tenure})`, formatRp(data.biayaCicilan));
+    tableRows.push({
+      desc: `Cicilan Pemasangan`,
+      detail: `Angsuran ke-${data.cicilanInfo.bulanKe} dari ${data.cicilanInfo.tenure} bulan`,
+      price: formatRp(data.biayaCicilan),
+      qty: '1',
+      total: formatRp(data.biayaCicilan)
+    });
   }
-  
-  // --- Total ---
-  y += 1;
-  doc.setFillColor(240, 244, 248);
-  doc.roundedRect(mL, y - 3, contentW, 11, 1.5, 1.5, 'F');
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...gray);
-  doc.text('TOTAL TAGIHAN', mL + 3, y + 1);
-  doc.setFontSize(11);
-  doc.setTextColor(...darkBlue);
-  doc.text(formatRp(data.total), mR - 3, y + 2, { align: 'right' });
-  y += 13;
-  
-  // --- LUNAS Watermark / Status ---
-  if (data.isPaid) {
-    doc.setFillColor(...green);
-    doc.roundedRect(cX - 18, y - 3, 36, 10, 2, 2, 'F');
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...white);
-    doc.text('LUNAS', cX, y + 3.5, { align: 'center' });
-    y += 12;
-    
-    // Paid date
-    doc.setFontSize(6);
+
+  // Draw rows
+  tableRows.forEach((row, idx) => {
+    const rowH = 16;
+    // Alternate row background
+    if (idx % 2 === 0) {
+      doc.setFillColor(...paleBlue);
+      doc.rect(mL, y, contentW, rowH, 'F');
+    }
+
+    // Row border
+    doc.setDrawColor(...lightGray);
+    doc.setLineWidth(0.3);
+    doc.line(mL, y + rowH, mR, y + rowH);
+
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...gray);
-    doc.text(`Dibayar: ${data.paidAt ? formatDate(data.paidAt) : '-'}`, cX, y, { align: 'center' });
-    y += 5;
-  } else {
-    doc.setFillColor(239, 68, 68);
-    doc.roundedRect(cX - 22, y - 3, 44, 10, 2, 2, 'F');
-    doc.setFontSize(10);
+    doc.setTextColor(...darkText);
+    doc.text(row.desc, colX.desc + 4, y + 6);
+
+    // Detail sub-text
+    doc.setFontSize(7);
+    doc.setTextColor(...grayText);
+    doc.text(row.detail, colX.desc + 4, y + 11);
+
+    // Price
+    doc.setFontSize(9);
+    doc.setTextColor(...darkText);
+    doc.text(row.price, colX.price + 2, y + 7);
+
+    // Qty
+    doc.text(row.qty, colX.qty + 4, y + 7);
+
+    // Total
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...white);
-    doc.text('BELUM LUNAS', cX, y + 3.5, { align: 'center' });
-    y += 14;
+    doc.text(row.total, colX.total + 2, y + 7);
+
+    y += rowH;
+  });
+
+  // Add empty rows to fill visual space (like the reference)
+  const emptyRows = Math.max(0, 3 - tableRows.length);
+  for (let i = 0; i < emptyRows; i++) {
+    const rowH = 12;
+    if ((tableRows.length + i) % 2 === 0) {
+      doc.setFillColor(...paleBlue);
+      doc.rect(mL, y, contentW, rowH, 'F');
+    }
+    doc.setDrawColor(...lightGray);
+    doc.setLineWidth(0.3);
+    doc.line(mL, y + rowH, mR, y + rowH);
+    y += rowH;
   }
-  
-  // --- Closing ---
-  drawDashedLine(y);
-  y += 5;
-  
-  doc.setFontSize(6.5);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(...gray);
-  const closingLines = doc.splitTextToSize(
-    'Terima kasih telah membayar tepat waktu. Kelancaran air, kemakmuran bersama. Simpan kwitansi ini sebagai bukti pembayaran yang sah.',
-    contentW
-  );
-  doc.text(closingLines, cX, y, { align: 'center' });
-  y += closingLines.length * 3.5;
-  
-  // Footer
-  y += 3;
-  doc.setFontSize(5.5);
+
+  // --- Table bottom border ---
+  doc.setDrawColor(...deepBlue);
+  doc.setLineWidth(0.5);
+  doc.line(mL, y, mR, y);
+
+  y += 8;
+
+  // ===== INVOICE TO & TOTALS SECTION =====
+  const splitY = y;
+
+  // --- Left side: Invoice To ---
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...deepBlue);
+  doc.text('Tagihan untuk:', mL, splitY + 2);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...darkText);
+  doc.text(data.memberName, mL, splitY + 9);
+
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(180, 180, 180);
-  doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, cX, y, { align: 'center' });
-  y += 3;
-  doc.text('Pamsimas Dusun Pilang — Sistem Otomatis', cX, y, { align: 'center' });
-  
+  doc.setTextColor(...grayText);
+  doc.text(`ID: ${data.memberId}`, mL, splitY + 15);
+  doc.text(`Zona: ${data.zone}`, mL, splitY + 20);
+  if (data.address) {
+    const addr = data.address.length > 40 ? data.address.substring(0, 40) + '...' : data.address;
+    doc.text(addr, mL, splitY + 25);
+  }
+
+  // --- Right side: Subtotal / Fees / Total ---
+  const rightCol = mR - 70;
+  const valCol = mR;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...grayText);
+  doc.text('Subtotal', rightCol, splitY + 3);
+  doc.setTextColor(...darkText);
+  doc.setFont('helvetica', 'bold');
+  doc.text(formatRp(data.biayaAir), valCol, splitY + 3, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...grayText);
+  doc.text('Biaya Beban', rightCol, splitY + 9);
+  doc.setTextColor(...darkText);
+  doc.text(formatRp(data.biayaBeban), valCol, splitY + 9, { align: 'right' });
+
+  if (data.biayaCicilan > 0) {
+    doc.setTextColor(...grayText);
+    doc.text('Cicilan', rightCol, splitY + 15);
+    doc.setTextColor(...darkText);
+    doc.text(formatRp(data.biayaCicilan), valCol, splitY + 15, { align: 'right' });
+  }
+
+  // Separator line
+  const totLineY = data.biayaCicilan > 0 ? splitY + 20 : splitY + 16;
+  doc.setDrawColor(...lightGray);
+  doc.setLineWidth(0.4);
+  doc.line(rightCol, totLineY, valCol, totLineY);
+
+  // TOTAL box
+  const totalBoxY = totLineY + 3;
+  doc.setFillColor(...deepBlue);
+  doc.roundedRect(rightCol - 2, totalBoxY - 2, valCol - rightCol + 4, 14, 2, 2, 'F');
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...white);
+  doc.text('TOTAL', rightCol + 4, totalBoxY + 7);
+
+  doc.setFontSize(13);
+  doc.text(formatRp(data.total), valCol - 3, totalBoxY + 7, { align: 'right' });
+
+  // ===== STATUS STAMP =====
+  y = totalBoxY + 26;
+
+  if (data.isPaid) {
+    // LUNAS stamp
+    doc.setDrawColor(...green);
+    doc.setLineWidth(2);
+    doc.roundedRect(cX - 28, y - 8, 56, 18, 3, 3, 'S');
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...green);
+    doc.text('LUNAS', cX, y + 4, { align: 'center' });
+
+    y += 14;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...grayText);
+    doc.text(`Dibayar: ${data.paidAt ? formatDate(data.paidAt) : '-'}`, cX, y, { align: 'center' });
+    y += 6;
+  } else {
+    // BELUM LUNAS stamp
+    doc.setDrawColor(...red);
+    doc.setLineWidth(2);
+    doc.roundedRect(cX - 35, y - 8, 70, 18, 3, 3, 'S');
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...red);
+    doc.text('BELUM LUNAS', cX, y + 4, { align: 'center' });
+    y += 16;
+  }
+
+  // ===== SIGNATURE =====
+  y += 4;
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(...grayText);
+  doc.text('Tanda Tangan Admin', mR - 5, y, { align: 'right' });
+  y += 20;
+  doc.setLineWidth(0.3);
+  doc.setDrawColor(...lightGray);
+  doc.line(mR - 55, y, mR, y);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Petugas Pamsimas Dusun Pilang', mR - 5, y + 5, { align: 'right' });
+
+  // ===== BOTTOM WAVE FOOTER =====
+  const footerStartY = pageH - 42;
+
+  // Decorative wave shapes
+  doc.setFillColor(...softBlue);
+  for (let x = -10; x <= pageW + 10; x += 30) {
+    doc.ellipse(x, footerStartY + 4, 22, 10, 'F');
+  }
+
+  doc.setFillColor(...lightBlue);
+  for (let x = -5; x <= pageW + 5; x += 28) {
+    doc.ellipse(x, footerStartY + 10, 20, 8, 'F');
+  }
+
+  doc.setFillColor(...medBlue);
+  doc.rect(0, footerStartY + 12, pageW, pageH - footerStartY - 12, 'F');
+
+  doc.setFillColor(...deepBlue);
+  doc.rect(0, footerStartY + 18, pageW, pageH - footerStartY - 18, 'F');
+
+  // Decorative seaweed/coral shapes (simple vertical ellipses)
+  doc.setFillColor(...medBlue);
+  doc.ellipse(25, footerStartY + 8, 3, 12, 'F');
+  doc.ellipse(32, footerStartY + 10, 2.5, 10, 'F');
+  doc.ellipse(pageW - 30, footerStartY + 6, 3, 14, 'F');
+  doc.ellipse(pageW - 22, footerStartY + 9, 2.5, 11, 'F');
+  doc.ellipse(pageW - 38, footerStartY + 11, 2, 8, 'F');
+
+  // Footer text
+  const footY = pageH - 14;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(200, 220, 240);
+
+  // Left: email
+  doc.text('pamsimas.pilang@gmail.com', mL + 5, footY);
+  // Center: phone
+  doc.text('+0812-xxxx-xxxx', cX, footY, { align: 'center' });
+  // Right: address
+  doc.text('Dusun Pilang, Wonoayu, Sidoarjo', mR - 5, footY, { align: 'right' });
+
+  // Bottom line with icons (text based)
+  doc.setFontSize(7);
+  doc.setTextColor(180, 200, 225);
+  doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, cX, footY + 7, { align: 'center' });
+  doc.text('Pamsimas Dusun Pilang — Sistem Manajemen Air Bersih', cX, footY + 11, { align: 'center' });
+
   return doc;
 }
 
@@ -384,9 +587,9 @@ function generateReceiptPDF(data) {
 function sendViaWhatsApp(memberData, billData) {
   const waPhone = toWAPhone(memberData.phone);
   const period = `${monthName(billData.month)} ${billData.year}`;
-  
+
   let statusText = billData.isPaid ? '✅ *LUNAS*' : '⏳ *BELUM LUNAS*';
-  
+
   let message = '';
   if (billData.isPaid) {
     message = `Assalamu'alaikum Bpk/Ibu *${memberData.fullName}*,\n\n`;
@@ -419,7 +622,7 @@ function sendViaWhatsApp(memberData, billData) {
     message += `Terima kasih 🙏\n`;
     message += `— _Admin Pamsimas Pilang_`;
   }
-  
+
   const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
   window.open(url, '_blank');
 }
@@ -431,36 +634,36 @@ function sendViaWhatsApp(memberData, billData) {
 function handleRoute() {
   const hash = window.location.hash || '#';
   const session = getSession();
-  
+
   if (!session) {
     if (hash === '#portal') return renderPublicPortal();
     return renderLogin();
   }
-  
+
   // Authenticated routing
   const role = session.role; // 'admin' atau 'petugas'
-  
+
   // Default routes based on role
   if (hash === '#' || hash === '') {
     window.location.hash = role === 'admin' ? '#dashboard' : '#tugas';
     return;
   }
-  
+
   // Render main layout wrapper first if needed
   let contentArea = document.getElementById('main-content-area');
   if (!contentArea) {
     renderAppLayout(session);
     contentArea = document.getElementById('main-content-area');
   }
-  
+
   // Update active sidebar link
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const activeLink = document.querySelector(`.nav-item[href="${hash}"]`);
   if (activeLink) activeLink.classList.add('active');
-  
+
   // Routes switch
   contentArea.innerHTML = ''; // clear area
-  
+
   if (role === 'admin') {
     switch (hash) {
       case '#dashboard': renderAdminDashboard(contentArea); break;
@@ -506,7 +709,7 @@ function renderLogin() {
               <label>Username</label>
               <div style="position:relative;">
                 <i class="fas fa-user" style="position:absolute; left:14px; top:14px; color:var(--text-muted)"></i>
-                <input id="loginUsername" required style="padding-left:40px;" placeholder="Masukkan username" />
+                <input id="loginUsername" type="text" required style="padding-left:40px;" placeholder="Masukkan username" />
               </div>
             </div>
             
@@ -532,48 +735,71 @@ function renderLogin() {
       </div>
     </div>
   `;
-  
+
   // Logic Login
   document.getElementById('togglePassword').onclick = (e) => {
     const inp = document.getElementById('loginPassword');
     inp.type = inp.type === 'password' ? 'text' : 'password';
     e.target.className = inp.type === 'password' ? 'fas fa-eye' : 'fas fa-eye-slash';
   };
-  
+
   document.getElementById('btnToPortal').onclick = () => {
     window.location.hash = '#portal';
   };
-  
-  document.getElementById('loginForm').onsubmit = (e) => {
+
+  document.getElementById('loginForm').onsubmit = async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
     const u = e.target.loginUsername.value.trim();
     const p = e.target.loginPassword.value;
-    
-    // Check master admin
-    const admin = JSON.parse(localStorage.getItem(STORAGE.admin));
-    if (u === admin.username && p === admin.password) {
-      setSession({ username: u, role: 'admin', name: admin.name });
-      logAction('login', 'Admin logged in');
-      showToast('Login berhasil sebagai Admin');
-      window.location.hash = '#dashboard';
-      handleRoute();
-      return;
+
+    // Disable button to prevent double submit
+    btn.disabled = true;
+    const oldText = btn.innerHTML;
+    btn.innerHTML = 'Memproses... <i class="fas fa-spinner fa-spin"></i>';
+
+    // Try API login first, fall back to localStorage if server is unavailable
+    let loggedIn = false;
+
+    try {
+      const res = await apiLogin(u, p);
+      if (res && res.user) {
+        setSession({
+          username: res.user.username,
+          email: res.user.email,
+          role: res.user.role,
+          name: res.user.name
+        });
+        loggedIn = true;
+      }
+    } catch (err) {
+      // API unavailable — try localStorage fallback
+      const admin = JSON.parse(localStorage.getItem(STORAGE.admin));
+      const users = getDB(STORAGE.users);
+
+      if (admin && u === admin.username && p === admin.password) {
+        setSession({ username: admin.username, role: admin.role, name: admin.name });
+        loggedIn = true;
+      } else {
+        const petugas = users.find(x => x.username === u && x.password === p);
+        if (petugas) {
+          setSession({ username: petugas.username, role: petugas.role, name: petugas.name });
+          loggedIn = true;
+        }
+      }
     }
-    
-    // Check petugas
-    const users = getDB(STORAGE.users);
-    const user = users.find(x => x.username === u && x.password === p);
-    
-    if (user) {
-      setSession({ username: u, role: user.role, name: user.name });
-      logAction('login', `Petugas ${u} logged in`);
-      showToast(`Login berhasil sebagai Petugas`);
-      window.location.hash = '#tugas';
+
+    if (loggedIn) {
+      const session = getSession();
+      showToast(`Login berhasil sebagai ${session.role === 'admin' ? 'Admin' : 'Petugas'}`);
+      window.location.hash = session.role === 'admin' ? '#dashboard' : '#tugas';
       handleRoute();
-      return;
+    } else {
+      showToast('Login gagal, periksa username dan password!', 'error');
     }
-    
-    showToast('Username atau password salah!', 'error');
+
+    btn.disabled = false;
+    btn.innerHTML = oldText;
   };
 }
 
@@ -619,50 +845,50 @@ function renderPublicPortal() {
       </div>
     </div>
   `;
-  
+
   document.getElementById('btnBackLogin').onclick = () => {
     window.location.hash = '#';
   };
-  
+
   const search = () => {
     const id = document.getElementById('portalSearchId').value.trim();
     if (!id) return;
     renderPortalResult(id);
   };
-  
+
   const searchName = () => {
-     const name = document.getElementById('portalSearchName').value.trim().toLowerCase();
-     if(!name) return;
-     const members = getDB(STORAGE.members);
-     const matches = members.filter(m => m.fullName.toLowerCase().includes(name));
-     
-     const res = document.getElementById('portalResultArea');
-     if(matches.length === 0) {
-        res.innerHTML = `<div class="card mt-4 text-center border-danger text-danger"><i class="fas fa-exclamation-triangle"></i> Data tidak ditemukan.</div>`;
-        return;
-     }
-     
-     if (matches.length === 1) {
-         renderPortalResult(matches[0].id);
-         return;
-     }
-     
-     // Multiple matches
-     let html = `<div class="card mt-4"><h3>Ditemukan ${matches.length} pelanggan:</h3><ul style="list-style:none; padding:0; margin-top:10px;">`;
-     matches.forEach(m => {
-        html += `<li style="padding:10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+    const name = document.getElementById('portalSearchName').value.trim().toLowerCase();
+    if (!name) return;
+    const members = getDB(STORAGE.members);
+    const matches = members.filter(m => m.fullName.toLowerCase().includes(name));
+
+    const res = document.getElementById('portalResultArea');
+    if (matches.length === 0) {
+      res.innerHTML = `<div class="card mt-4 text-center border-danger text-danger"><i class="fas fa-exclamation-triangle"></i> Data tidak ditemukan.</div>`;
+      return;
+    }
+
+    if (matches.length === 1) {
+      renderPortalResult(matches[0].id);
+      return;
+    }
+
+    // Multiple matches
+    let html = `<div class="card mt-4"><h3>Ditemukan ${matches.length} pelanggan:</h3><ul style="list-style:none; padding:0; margin-top:10px;">`;
+    matches.forEach(m => {
+      html += `<li style="padding:10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
           <div><b style="color:var(--accent-info)">${m.id}</b> - ${m.fullName}<br><small>${m.zone}</small></div>
           <button class="btn btn-outline btn-select-member" data-id="${m.id}">Lihat Detail</button>
         </li>`;
-     });
-     html += `</ul></div>`;
-     res.innerHTML = html;
-     
-     res.querySelectorAll('.btn-select-member').forEach(btn => {
-         btn.onclick = (e) => renderPortalResult(e.target.dataset.id);
-     });
+    });
+    html += `</ul></div>`;
+    res.innerHTML = html;
+
+    res.querySelectorAll('.btn-select-member').forEach(btn => {
+      btn.onclick = (e) => renderPortalResult(e.target.dataset.id);
+    });
   };
-  
+
   document.getElementById('btnSearchPortal').onclick = search;
   document.getElementById('btnSearchNamePortal').onclick = searchName;
 }
@@ -671,61 +897,61 @@ function renderPortalResult(memberId) {
   const members = getDB(STORAGE.members);
   const member = members.find(m => m.id === memberId);
   const res = document.getElementById('portalResultArea');
-  
+
   if (!member) {
     res.innerHTML = `<div class="card mt-4 text-center text-danger"><i class="fas fa-times-circle" style="font-size:2rem; margin-bottom:10px;"></i><br>Nomor Pelanggan tidak ditemukan.</div>`;
     return;
   }
-  
+
   // Calculate current bill
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1; // current month
-  
+
   const usage = getDB(STORAGE.usage).find(u => u.memberId === memberId && u.year === year && u.month === month);
   const payment = getDB(STORAGE.payments).find(p => p.memberId === memberId && p.year === year && p.month === month);
   const installment = getDB(STORAGE.installments).find(i => i.memberId === memberId && i.status === 'active');
-  
+
   const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
   const adminFee = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
-  
+
   let billAir = 0;
   let cicilanBulanIni = 0;
   let hasCicilan = false;
   let cicilanProgress = 0;
   let cicilanBulanKe = 0;
-  
+
   if (usage) {
-     billAir = usage.volume * rate;
+    billAir = usage.volume * rate;
   }
-  
+
   if (installment) {
-     const start = new Date(installment.startYear, installment.startMonth - 1, 1);
-     const current = new Date(year, month - 1, 1);
-     const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
-     
-     if (diffMonths >= 0 && diffMonths < installment.tenure) {
-         hasCicilan = true;
-         cicilanBulanIni = installment.monthlyAmount;
-         cicilanBulanKe = diffMonths + 1;
-         cicilanProgress = (cicilanBulanKe / installment.tenure) * 100;
-     }
+    const start = new Date(installment.startYear, installment.startMonth - 1, 1);
+    const current = new Date(year, month - 1, 1);
+    const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
+
+    if (diffMonths >= 0 && diffMonths < installment.tenure) {
+      hasCicilan = true;
+      cicilanBulanIni = installment.monthlyAmount;
+      cicilanBulanKe = diffMonths + 1;
+      cicilanProgress = (cicilanBulanKe / installment.tenure) * 100;
+    }
   }
-  
+
   const isBilled = usage != null;
   const totalDue = isBilled ? (billAir + adminFee + cicilanBulanIni) : 0;
   const isPaid = payment != null;
-  
+
   let statusHTML = ``;
   if (!isBilled) {
-      statusHTML = `<div class="badge badge-warning" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-clock"></i> Belum Dicatat</div>`;
+    statusHTML = `<div class="badge badge-warning" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-clock"></i> Belum Dicatat</div>`;
   } else if (isPaid) {
-      statusHTML = `<div class="badge badge-success" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-check-circle"></i> Lunas</div>
+    statusHTML = `<div class="badge badge-success" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-check-circle"></i> Lunas</div>
                     <p style="font-size:0.8rem; margin-top:5px; color:var(--accent-success)">Dibayar: ${formatDate(payment.paidAt)}</p>`;
   } else {
-      statusHTML = `<div class="badge badge-danger" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-exclamation-circle"></i> Belum Lunas</div>`;
+    statusHTML = `<div class="badge badge-danger" style="font-size:1rem; padding:8px 16px;"><i class="fas fa-exclamation-circle"></i> Belum Lunas</div>`;
   }
-  
+
   res.innerHTML = `
     <div class="card mt-4 animate-slide-up" style="border-top: 4px solid var(--accent-primary)">
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -735,7 +961,7 @@ function renderPortalResult(memberId) {
         </div>
         <div style="text-align:right">
           <small class="text-muted">Periode Tagihan</small><br>
-          <b style="font-size:1.1rem; color:var(--accent-primary)">${new Date(0, month-1).toLocaleString('id-ID', {month:'long'})} ${year}</b>
+          <b style="font-size:1.1rem; color:var(--accent-primary)">${new Date(0, month - 1).toLocaleString('id-ID', { month: 'long' })} ${year}</b>
         </div>
       </div>
       
@@ -807,7 +1033,7 @@ function renderPortalResult(memberId) {
 // --- 4. VIEWS: MASTER LAYOUT ---
 function renderAppLayout(session) {
   const isAdmin = session.role === 'admin';
-  
+
   appRoot.innerHTML = `
     <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
@@ -869,27 +1095,28 @@ function renderAppLayout(session) {
       </div>
     </div>
   `;
-  
+
   // Logic Layout
-  document.getElementById('btnLogout').onclick = () => {
+  document.getElementById('btnLogout').onclick = async () => {
+    try { await apiLogout(); } catch (e) { console.error('Logout error:', e); }
     logAction('logout', 'User logged out');
     clearSession();
     window.location.hash = '#';
   };
-  
+
   // Mobile sidebar toggle
   const sidebar = document.getElementById('sidebar');
   document.getElementById('btnToggleSidebar').onclick = () => {
     sidebar.classList.toggle('open');
   };
-  
+
   // Update Real-time date
   const updateDate = () => {
-     const el = document.getElementById('topbar-date');
-     if(el) {
-       const d = new Date();
-       el.innerText = d.toLocaleDateString('id-ID', {weekday:'long', day:'2-digit', month:'long', year:'numeric'}) + ' - ' + d.toLocaleTimeString('id-ID');
-     }
+    const el = document.getElementById('topbar-date');
+    if (el) {
+      const d = new Date();
+      el.innerText = d.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) + ' - ' + d.toLocaleTimeString('id-ID');
+    }
   };
   updateDate();
   setInterval(updateDate, 1000);
@@ -897,7 +1124,7 @@ function renderAppLayout(session) {
 
 function updateTopbarTitle(title) {
   const el = document.getElementById('topbar-title');
-  if(el) {
+  if (el) {
     el.querySelector('h2').innerText = title;
   }
 }
@@ -906,149 +1133,181 @@ function updateTopbarTitle(title) {
 
 function renderAdminDashboard(container) {
   updateTopbarTitle('Dashboard Utama');
-  
-  const members = getDB(STORAGE.members);
-  const usage = getDB(STORAGE.usage);
-  const payments = getDB(STORAGE.payments);
-  const installments = getDB(STORAGE.installments);
-  
+
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
-  const lastMonth = month === 1 ? 12 : month - 1;
-  const lastMonthYear = month === 1 ? year - 1 : year;
-  
-  // Calculate specific KPI
-  let totalPendapatanBulanIni = 0;
-  payments.filter(p => p.year === year && p.month === month).forEach(p => {
-    totalPendapatanBulanIni += (p.amountAir || 0) + (p.amountBeban || 0) + (p.amountCicilan || 0);
-  });
-  
-  const activeMembers = members.filter(m => m.status !== 'nonaktif').length;
-  
-  // Tunggakan calculation (for last month)
-  const billedLastMonth = usage.filter(u => u.year === lastMonthYear && u.month === lastMonth);
-  const paidLastMonth = payments.filter(p => p.year === lastMonthYear && p.month === lastMonth).length;
-  const tunggakanRate = billedLastMonth.length ? ((billedLastMonth.length - paidLastMonth) / billedLastMonth.length * 100).toFixed(1) : 0;
-  
-  // Task completion rate this month
-  const currentUsage = usage.filter(u => u.year === year && u.month === month).length;
-  const taskRate = activeMembers ? (currentUsage / activeMembers * 100).toFixed(1) : 0;
-  
-  // Stats
-  const cicilanAktif = installments.filter(i => i.status === 'active');
-  const totalCicilanSisa = cicilanAktif.reduce((acc, i) => acc + (i.totalAmount - (i.monthlyAmount * i.monthsPaid)), 0);
+  const monthNameStr = new Date(0, month - 1).toLocaleString('id-ID', { month: 'short' });
 
   container.innerHTML = `
-    <div class="kpi-grid animate-fade-in">
-      <div class="card kpi-card">
-        <i class="fas fa-wallet kpi-icon text-success"></i>
-        <div class="kpi-title">Pendapatan Bulan Ini</div>
-        <div class="kpi-value">${formatRp(totalPendapatanBulanIni)}</div>
-        <div class="kpi-trend text-success"><i class="fas fa-arrow-up"></i> <span>Data realtime</span></div>
-      </div>
-      <div class="card kpi-card">
-        <i class="fas fa-users kpi-icon text-info"></i>
-        <div class="kpi-title">Pelanggan Aktif</div>
-        <div class="kpi-value">${activeMembers}</div>
-        <div class="kpi-trend text-muted"><span>Total ${members.length} terdaftar</span></div>
-      </div>
-      <div class="card kpi-card">
-        <i class="fas fa-exclamation-triangle kpi-icon text-danger"></i>
-        <div class="kpi-title">Tunggakan (Bulan Lalu)</div>
-        <div class="kpi-value text-danger">${tunggakanRate}%</div>
-        <div class="kpi-trend text-danger"><i class="fas fa-circle"></i> <span>${billedLastMonth.length - paidLastMonth} warga belum lunas</span></div>
-      </div>
-      <div class="card kpi-card">
-        <i class="fas fa-tasks kpi-icon text-primary"></i>
-        <div class="kpi-title">Rasio Pencatatan (${new Date(0, month-1).toLocaleString('id-ID', {month:'short'})})</div>
-        <div class="kpi-value">${taskRate}%</div>
-        <div class="kpi-trend text-primary"><span>${currentUsage} dari ${activeMembers} dicatat</span></div>
-      </div>
+    <div id="dashboardLoading" class="text-center py-10">
+      <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+      <p class="mt-4 text-muted">Memuat data dashboard...</p>
     </div>
-    
-    <div class="flex flex-col lg:flex-row gap-6 animate-slide-up" style="display:grid; grid-template-columns: 2fr 1fr; gap:1.5rem;">
-      <div class="card">
-        <div class="card-header">
-          <h3><i class="fas fa-chart-area text-info"></i> Grafik Pendapatan & Pemakaian (6 Bulan)</h3>
+    <div id="dashboardContent" style="display:none;"></div>
+  `;
+
+  const loadDashboard = async () => {
+    // Compute KPIs from localStorage
+    const members = getDB(STORAGE.members);
+    const usages = getDB(STORAGE.usage);
+    const payments = getDB(STORAGE.payments);
+    const installments = getDB(STORAGE.installments);
+    const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+    const adminFee = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
+
+    const activeMembers = members.filter(m => m.status !== 'nonaktif');
+    const monthUsages = usages.filter(u => u.year === year && u.month === month);
+    const monthPayments = payments.filter(p => p.year === year && p.month === month);
+
+    // Revenue this month
+    let revenueTotal = 0;
+    monthPayments.forEach(p => { revenueTotal += (p.total || 0); });
+
+    // Arrears (previous month)
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const prevUsages = usages.filter(u => u.year === prevYear && u.month === prevMonth);
+    const prevPayments = payments.filter(p => p.year === prevYear && p.month === prevMonth);
+    const arrearsCount = prevUsages.length - prevPayments.length;
+    const arrearsRate = prevUsages.length > 0 ? Math.round((arrearsCount / prevUsages.length) * 100) : 0;
+
+    // Recording rate
+    const recordedCount = monthUsages.length;
+    const recordingRate = activeMembers.length > 0 ? Math.round((recordedCount / activeMembers.length) * 100) : 0;
+
+    // Installments
+    const activeInstallments = installments.filter(i => i.status === 'active');
+    let outstandingDebt = 0;
+    activeInstallments.forEach(inst => {
+      const remaining = inst.totalAmount - (inst.monthsPaid * inst.monthlyAmount);
+      outstandingDebt += Math.max(0, remaining);
+    });
+
+    // Chart data (last 6 months)
+    const chartLabels = [];
+    const chartValues = [];
+    for (let i = 5; i >= 0; i--) {
+      let cm = month - i;
+      let cy = year;
+      if (cm <= 0) { cm += 12; cy--; }
+      chartLabels.push(new Date(0, cm - 1).toLocaleString('id-ID', { month: 'short' }) + ' ' + cy);
+      const mPayments = payments.filter(p => p.year === cy && p.month === cm);
+      let mTotal = 0;
+      mPayments.forEach(p => { mTotal += (p.total || 0); });
+      chartValues.push(mTotal);
+    }
+
+    const kpi = {
+      revenue: { total: revenueTotal },
+      members: { active: activeMembers.length, total: members.length },
+      arrears: { rate: arrearsRate < 0 ? 0 : arrearsRate, count: arrearsCount < 0 ? 0 : arrearsCount },
+      recording: { rate: recordingRate, recorded: recordedCount, total: activeMembers.length },
+      installments: { activeCount: activeInstallments.length, outstandingDebt }
+    };
+    const chartData = { labels: chartLabels, data: chartValues };
+
+    const content = document.getElementById('dashboardContent');
+    const loader = document.getElementById('dashboardLoading');
+
+    content.innerHTML = `
+      <div class="kpi-grid animate-fade-in">
+        <div class="card kpi-card">
+          <i class="fas fa-wallet kpi-icon text-success"></i>
+          <div class="kpi-title">Pendapatan Bulan Ini</div>
+          <div class="kpi-value">${formatRp(kpi.revenue.total)}</div>
+          <div class="kpi-trend text-success"><i class="fas fa-arrow-up"></i> <span>Data realtime</span></div>
         </div>
-        <canvas id="dashboardChart" height="120"></canvas>
+        <div class="card kpi-card">
+          <i class="fas fa-users kpi-icon text-info"></i>
+          <div class="kpi-title">Pelanggan Aktif</div>
+          <div class="kpi-value">${kpi.members.active}</div>
+          <div class="kpi-trend text-muted"><span>Total ${kpi.members.total} terdaftar</span></div>
+        </div>
+        <div class="card kpi-card">
+          <i class="fas fa-exclamation-triangle kpi-icon text-danger"></i>
+          <div class="kpi-title">Tunggakan (Bulan Lalu)</div>
+          <div class="kpi-value text-danger">${kpi.arrears.rate}%</div>
+          <div class="kpi-trend text-danger"><i class="fas fa-circle"></i> <span>${kpi.arrears.count} warga belum lunas</span></div>
+        </div>
+        <div class="card kpi-card">
+          <i class="fas fa-tasks kpi-icon text-primary"></i>
+          <div class="kpi-title">Rasio Pencatatan (${monthNameStr})</div>
+          <div class="kpi-value">${kpi.recording.rate}%</div>
+          <div class="kpi-trend text-primary"><span>${kpi.recording.recorded} dari ${kpi.recording.total} dicatat</span></div>
+        </div>
       </div>
       
-      <div class="card">
-         <div class="card-header">
-          <h3><i class="fas fa-bolt text-warning"></i> Aktivitas Terbaru</h3>
+      <div class="flex flex-col lg:flex-row gap-6 animate-slide-up" style="display:grid; grid-template-columns: 2fr 1fr; gap:1.5rem;">
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fas fa-chart-area text-info"></i> Grafik Pendapatan & Pemakaian (6 Bulan)</h3>
+          </div>
+          <canvas id="dashboardChart" height="120"></canvas>
         </div>
-        <div id="activityFeed" style="display:flex; flex-direction:column; gap:15px; max-height:300px; overflow-y:auto; padding-right:10px;">
-          <!-- feed -->
+        
+        <div class="card">
+           <div class="card-header">
+            <h3><i class="fas fa-bolt text-warning"></i> Aktivitas Terbaru</h3>
+          </div>
+          <div id="activityFeed" style="display:flex; flex-direction:column; gap:15px; max-height:300px; overflow-y:auto; padding-right:10px;">
+            <!-- feed -->
+          </div>
         </div>
       </div>
-    </div>
-    
-    <div class="card mt-6 animate-slide-up">
-       <div class="card-header">
-          <h3><i class="fas fa-handshake text-primary"></i> Ringkasan Cicilan Pemasangan</h3>
-        </div>
-        <div class="flex items-center justify-between">
-           <div>
-              <p style="margin:0" class="text-secondary">Warga dengan Cicilan Aktif</p>
-              <h2 style="margin:5px 0 0 0" class="text-primary">${cicilanAktif.length} Orang</h2>
-           </div>
-           <div style="text-align:right">
-              <p style="margin:0" class="text-secondary">Estimasi Piutang Sisa</p>
-              <h2 style="margin:5px 0 0 0" class="text-warning">${formatRp(totalCicilanSisa)}</h2>
-           </div>
-        </div>
-    </div>
-  `;
-  
-  // Render Chart
-  setTimeout(() => {
+      
+      <div class="card mt-6 animate-slide-up">
+         <div class="card-header">
+            <h3><i class="fas fa-handshake text-primary"></i> Ringkasan Cicilan Pemasangan</h3>
+          </div>
+          <div class="flex items-center justify-between">
+             <div>
+                <p style="margin:0" class="text-secondary">Warga dengan Cicilan Aktif</p>
+                <h2 style="margin:5px 0 0 0" class="text-primary">${kpi.installments.activeCount} Orang</h2>
+             </div>
+             <div style="text-align:right">
+                <p style="margin:0" class="text-secondary">Estimasi Piutang Sisa</p>
+                <h2 style="margin:5px 0 0 0" class="text-warning">${formatRp(kpi.installments.outstandingDebt)}</h2>
+             </div>
+          </div>
+      </div>
+    `;
+
+    loader.style.display = 'none';
+    content.style.display = 'block';
+
+    // Render Chart
     const ctx = document.getElementById('dashboardChart');
-    if(!ctx) return;
-    
-    const labels = [];
-    const airData = [];
-    
-    for(let i=5; i>=0; i--) {
-        const d = new Date(year, month - 1 - i, 1);
-        const y = d.getFullYear();
-        const m = d.getMonth() + 1;
-        labels.push(d.toLocaleString('id-ID', {month:'short'}) + ' ' + y);
-        
-        let total = 0;
-        getDB(STORAGE.payments).filter(p => p.year === y && p.month === m).forEach(p => total += p.total);
-        airData.push(total || 0);
+    if (ctx) {
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: chartData.labels,
+          datasets: [
+            { label: 'Total Pendapatan (Rp)', data: chartData.data, backgroundColor: 'rgba(59, 130, 246, 0.8)', borderRadius: 4 }
+          ]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+      });
     }
-    
-    new Chart(ctx, {
-       type: 'bar',
-       data: {
-         labels,
-         datasets: [
-           { label: 'Total Pendapatan (Rp)', data: airData, backgroundColor: 'rgba(59, 130, 246, 0.8)', borderRadius: 4 }
-         ]
-       },
-       options: { responsive: true, plugins: { legend: { display: false } } }
-    });
-    
+
     // Render Activity Feed
     const logs = getDB(STORAGE.logs).slice(0, 10);
     const feed = document.getElementById('activityFeed');
     let feedHTML = '';
-    
-    if(logs.length === 0) feedHTML = '<p class="text-muted text-center pt-4">Belum ada aktivitas.</p>';
-    
+
+    if (logs.length === 0) feedHTML = '<p class="text-muted text-center pt-4">Belum ada aktivitas.</p>';
+
     logs.forEach(log => {
-        let icon = 'fa-info-circle';
-        let color = 'text-primary';
-        
-        if (log.action === 'login') { icon = 'fa-sign-in-alt'; color = 'text-success'; }
-        if (log.action === 'bayar') { icon = 'fa-money-bill-wave'; color = 'text-success'; }
-        if (log.action === 'catat') { icon = 'fa-check'; color = 'text-info'; }
-        if (log.action === 'pasang') { icon = 'fa-tools'; color = 'text-warning'; }
-        
-        feedHTML += `
+      let icon = 'fa-info-circle';
+      let color = 'text-primary';
+
+      if (log.action === 'login') { icon = 'fa-sign-in-alt'; color = 'text-success'; }
+      if (log.action === 'bayar') { icon = 'fa-money-bill-wave'; color = 'text-success'; }
+      if (log.action === 'catat') { icon = 'fa-check'; color = 'text-info'; }
+      if (log.action === 'pasang') { icon = 'fa-tools'; color = 'text-warning'; }
+
+      feedHTML += `
           <div style="display:flex; gap:12px; align-items:flex-start; border-bottom:1px solid var(--border); padding-bottom:10px;">
              <div style="width:32px; height:32px; border-radius:16px; background:var(--surface); display:grid; place-items:center;" class="${color}">
                <i class="fas ${icon}"></i>
@@ -1062,14 +1321,16 @@ function renderAdminDashboard(container) {
         `;
     });
     feed.innerHTML = feedHTML;
-  }, 100);
+  };
+
+  loadDashboard();
 }
 
 
 function renderAdminPelanggan(container) {
   updateTopbarTitle('Manajemen Pelanggan');
   const members = getDB(STORAGE.members);
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in">
       <div class="flex justify-between items-center mb-4" style="flex-wrap:wrap; gap:10px;">
@@ -1150,28 +1411,28 @@ function renderAdminPelanggan(container) {
       </div>
     </div>
   `;
-  
+
   const tbody = document.getElementById('memberTbody');
   const countEl = document.getElementById('memberCount');
-  
+
   const renderTable = () => {
-     const search = document.getElementById('searchMember').value.toLowerCase();
-     const zone = document.getElementById('filterZone').value;
-     
-     const filtered = getDB(STORAGE.members).filter(m => {
-        const textMatch = [m.id, m.fullName, m.address, m.phone].join(' ').toLowerCase().includes(search);
-        const zoneMatch = !zone || m.zone === zone;
-        return textMatch && zoneMatch;
-     });
-     
-     countEl.innerText = `Menampilkan ${filtered.length} riwayat`;
-     
-     if(filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Tidak ada data pelanggan.</td></tr>`;
-        return;
-     }
-     
-     tbody.innerHTML = filtered.map(m => `
+    const search = document.getElementById('searchMember').value.toLowerCase();
+    const zone = document.getElementById('filterZone').value;
+
+    const filtered = getDB(STORAGE.members).filter(m => {
+      const textMatch = [m.id, m.fullName, m.address, m.phone].join(' ').toLowerCase().includes(search);
+      const zoneMatch = !zone || m.zone === zone;
+      return textMatch && zoneMatch;
+    });
+
+    countEl.innerText = `Menampilkan ${filtered.length} riwayat`;
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Tidak ada data pelanggan.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(m => `
         <tr>
           <td data-label="ID"><span class="badge badge-info">${m.id}</span></td>
           <td data-label="Nama Lengkap" class="font-semibold">${m.fullName}</td>
@@ -1186,102 +1447,102 @@ function renderAdminPelanggan(container) {
         </tr>
      `).join('');
   };
-  
+
   document.getElementById('searchMember').addEventListener('input', renderTable);
   document.getElementById('filterZone').addEventListener('change', renderTable);
-  
+
   const modal = document.getElementById('memberModal');
   const form = document.getElementById('memberForm');
-  
+
   const openModal = (isEdit = false) => {
-     modal.style.display = 'flex';
-     document.getElementById('modalTitle').innerText = isEdit ? 'Edit Warga' : 'Tambah Warga Baru';
+    modal.style.display = 'flex';
+    document.getElementById('modalTitle').innerText = isEdit ? 'Edit Warga' : 'Tambah Warga Baru';
   };
   const closeModal = () => {
-     modal.style.display = 'none';
-     form.reset();
-     document.getElementById('editMemberId').value = '';
+    modal.style.display = 'none';
+    form.reset();
+    document.getElementById('editMemberId').value = '';
   };
-  
+
   document.getElementById('btnAddMember').onclick = () => openModal(false);
   document.getElementById('btnCloseModal').onclick = closeModal;
   document.getElementById('btnCancelModal').onclick = closeModal;
-  
+
   window.editMember = (id) => {
-     const m = getDB(STORAGE.members).find(x => x.id === id);
-     if(!m) return;
-     document.getElementById('editMemberId').value = m.id;
-     document.getElementById('mId').value = m.id;
-     document.getElementById('mId').readOnly = true;
-     document.getElementById('mName').value = m.fullName;
-     document.getElementById('mAddress').value = m.address;
-     document.getElementById('mZone').value = m.zone;
-     document.getElementById('mPhone').value = m.phone;
-     document.getElementById('mStatus').value = m.status || 'aktif';
-     openModal(true);
+    const m = getDB(STORAGE.members).find(x => x.id === id);
+    if (!m) return;
+    document.getElementById('editMemberId').value = m.id;
+    document.getElementById('mId').value = m.id;
+    document.getElementById('mId').readOnly = true;
+    document.getElementById('mName').value = m.fullName;
+    document.getElementById('mAddress').value = m.address;
+    document.getElementById('mZone').value = m.zone;
+    document.getElementById('mPhone').value = m.phone;
+    document.getElementById('mStatus').value = m.status || 'aktif';
+    openModal(true);
   };
-  
+
   window.deleteMember = (id) => {
-     if(confirm(`Yakin ingin menghapus pelanggan ${id}? Data pemakaian mungkin akan yatim.`)) {
-         const members = getDB(STORAGE.members).filter(x => x.id !== id);
-         saveDB(STORAGE.members, members);
-         logAction('hapus_warga', `Menghapus warga ID: ${id}`);
-         showToast('Data warga dihapus');
-         renderTable();
-     }
+    if (confirm(`Yakin ingin menghapus pelanggan ${id}? Data pemakaian mungkin akan yatim.`)) {
+      const members = getDB(STORAGE.members).filter(x => x.id !== id);
+      saveDB(STORAGE.members, members);
+      logAction('hapus_warga', `Menghapus warga ID: ${id}`);
+      showToast('Data warga dihapus');
+      renderTable();
+    }
   };
-  
+
   form.onsubmit = (e) => {
-     e.preventDefault();
-     const editId = document.getElementById('editMemberId').value;
-     const members = getDB(STORAGE.members);
-     
-     let generatedId = document.getElementById('mId').value.trim();
-     if (!generatedId) {
-         const max = members.length > 0 ? Math.max(...members.map(m => parseInt(m.id.replace(/\D/g, '')) || 0)) : 0;
-         generatedId = `P-${String(max + 1).padStart(3, '0')}`;
-     }
-     
-     const data = {
-       id: editId || generatedId,
-       fullName: document.getElementById('mName').value.trim(),
-       address: document.getElementById('mAddress').value.trim(),
-       zone: document.getElementById('mZone').value.trim(),
-       phone: document.getElementById('mPhone').value.trim(),
-       status: document.getElementById('mStatus').value
-     };
-     
-     if (editId) {
-         const idx = members.findIndex(x => x.id === editId);
-         members[idx] = data;
-         logAction('edit_warga', `Mengedit warga ID: ${editId}`);
-     } else {
-         if (members.find(x => x.id === data.id)) {
-            showToast('ID sudah digunakan!', 'error');
-            return;
-         }
-         members.push(data);
-         logAction('tambah_warga', `Menambah warga baru: ${data.fullName}`);
-     }
-     
-     saveDB(STORAGE.members, members);
-     showToast(editId ? 'Perubahan disimpan' : 'Warga baru ditambahkan');
-     closeModal();
-     
-     // Refresh filter
-     const filterZone = document.getElementById('filterZone');
-     const currentZones = [...new Set(members.map(m => m.zone))].filter(Boolean);
-     filterZone.innerHTML = `<option value="">Semua Blok</option>` + currentZones.map(z => `<option value="${z}">${z}</option>`).join('');
-     
-     renderTable();
+    e.preventDefault();
+    const editId = document.getElementById('editMemberId').value;
+    const members = getDB(STORAGE.members);
+
+    let generatedId = document.getElementById('mId').value.trim();
+    if (!generatedId) {
+      const max = members.length > 0 ? Math.max(...members.map(m => parseInt(m.id.replace(/\D/g, '')) || 0)) : 0;
+      generatedId = `P-${String(max + 1).padStart(3, '0')}`;
+    }
+
+    const data = {
+      id: editId || generatedId,
+      fullName: document.getElementById('mName').value.trim(),
+      address: document.getElementById('mAddress').value.trim(),
+      zone: document.getElementById('mZone').value.trim(),
+      phone: document.getElementById('mPhone').value.trim(),
+      status: document.getElementById('mStatus').value
+    };
+
+    if (editId) {
+      const idx = members.findIndex(x => x.id === editId);
+      members[idx] = data;
+      logAction('edit_warga', `Mengedit warga ID: ${editId}`);
+    } else {
+      if (members.find(x => x.id === data.id)) {
+        showToast('ID sudah digunakan!', 'error');
+        return;
+      }
+      members.push(data);
+      logAction('tambah_warga', `Menambah warga baru: ${data.fullName}`);
+    }
+
+    saveDB(STORAGE.members, members);
+    showToast(editId ? 'Perubahan disimpan' : 'Warga baru ditambahkan');
+    closeModal();
+
+    // Refresh filter
+    const filterZone = document.getElementById('filterZone');
+    const currentZones = [...new Set(members.map(m => m.zone))].filter(Boolean);
+    filterZone.innerHTML = `<option value="">Semua Blok</option>` + currentZones.map(z => `<option value="${z}">${z}</option>`).join('');
+
+    renderTable();
   };
-  
+
   renderTable();
 }
 
 function renderAdminPemasangan(container) {
   updateTopbarTitle('Pemasangan Baru');
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in">
        <div class="stepper">
@@ -1308,29 +1569,29 @@ function renderAdminPemasangan(container) {
        </div>
     </div>
   `;
-  
+
   let currentStep = 1;
   const state = { memberId: '', biaya: 2500000, metode: 'cash', tenor: 0, petugasId: '' };
-  
+
   const updateWizard = () => {
-      document.querySelectorAll('.step').forEach((el, idx) => {
-         if (idx + 1 < currentStep) {
-            el.className = 'step completed';
-            el.querySelector('.step-circle').innerHTML = '<i class="fas fa-check"></i>';
-         } else if (idx + 1 === currentStep) {
-            el.className = 'step active';
-            el.querySelector('.step-circle').innerHTML = (idx + 1).toString();
-         } else {
-            el.className = 'step';
-            el.querySelector('.step-circle').innerHTML = (idx + 1).toString();
-         }
-      });
-      
-      const content = document.getElementById('wizardContent');
-      
-      if (currentStep === 1) {
-          const members = getDB(STORAGE.members).filter(m => !getDB(STORAGE.spk).find(s => s.memberId === m.id));
-          content.innerHTML = `
+    document.querySelectorAll('.step').forEach((el, idx) => {
+      if (idx + 1 < currentStep) {
+        el.className = 'step completed';
+        el.querySelector('.step-circle').innerHTML = '<i class="fas fa-check"></i>';
+      } else if (idx + 1 === currentStep) {
+        el.className = 'step active';
+        el.querySelector('.step-circle').innerHTML = (idx + 1).toString();
+      } else {
+        el.className = 'step';
+        el.querySelector('.step-circle').innerHTML = (idx + 1).toString();
+      }
+    });
+
+    const content = document.getElementById('wizardContent');
+
+    if (currentStep === 1) {
+      const members = getDB(STORAGE.members).filter(m => !getDB(STORAGE.spk).find(s => s.memberId === m.id));
+      content.innerHTML = `
              <h3 class="text-center mb-6">Pilih Warga untuk Pemasangan Baru</h3>
              <div class="form-group" style="max-width:400px; margin:0 auto;">
                 <label>Pilih Data Warga (Yang belum punya SPK)</label>
@@ -1344,16 +1605,16 @@ function renderAdminPemasangan(container) {
                 </div>
              </div>
           `;
-          document.getElementById('btnNext1').onclick = () => {
-             const v = document.getElementById('wzMember').value;
-             if(!v) return showToast('Pilih warga terlebih dahulu', 'error');
-             state.memberId = v;
-             currentStep++;
-             updateWizard();
-          };
-      } 
-      else if (currentStep === 2) {
-          content.innerHTML = `
+      document.getElementById('btnNext1').onclick = () => {
+        const v = document.getElementById('wzMember').value;
+        if (!v) return showToast('Pilih warga terlebih dahulu', 'error');
+        state.memberId = v;
+        currentStep++;
+        updateWizard();
+      };
+    }
+    else if (currentStep === 2) {
+      content.innerHTML = `
              <h3 class="text-center mb-6">Penetapan Biaya Instalasi</h3>
              <div class="form-group" style="max-width:400px; margin:0 auto;">
                 <label>Total Biaya Pemasangan (Rp)</label>
@@ -1366,17 +1627,17 @@ function renderAdminPemasangan(container) {
                 </div>
              </div>
           `;
-          document.getElementById('btnPrev2').onclick = () => { currentStep--; updateWizard(); };
-          document.getElementById('btnNext2').onclick = () => {
-             const v = Number(document.getElementById('wzBiaya').value);
-             if(v <= 0) return showToast('Biaya tidak valid', 'error');
-             state.biaya = v;
-             currentStep++;
-             updateWizard();
-          };
-      }
-      else if (currentStep === 3) {
-          content.innerHTML = `
+      document.getElementById('btnPrev2').onclick = () => { currentStep--; updateWizard(); };
+      document.getElementById('btnNext2').onclick = () => {
+        const v = Number(document.getElementById('wzBiaya').value);
+        if (v <= 0) return showToast('Biaya tidak valid', 'error');
+        state.biaya = v;
+        currentStep++;
+        updateWizard();
+      };
+    }
+    else if (currentStep === 3) {
+      content.innerHTML = `
              <h3 class="text-center mb-6">Pilih Metode Pembayaran</h3>
              <div style="max-width:600px; margin:0 auto;">
                 <div class="selection-grid">
@@ -1395,7 +1656,7 @@ function renderAdminPemasangan(container) {
                 <div id="cicilanOptions" style="display:${state.metode === 'cicilan' ? 'block' : 'none'}; background:var(--surface); padding:15px; border-radius:var(--radius-md); margin-bottom:20px;">
                     <label>Pilih Tenor Cicilan:</label>
                     <div class="flex gap-2 mb-4 mt-2" style="flex-wrap:wrap">
-                       ${[3,6,9,12].map(t => `<button class="btn ${state.tenor === t ? 'btn-primary' : 'btn-outline'} btnTenor" data-val="${t}">${t} Bulan</button>`).join('')}
+                       ${[3, 6, 9, 12].map(t => `<button class="btn ${state.tenor === t ? 'btn-primary' : 'btn-outline'} btnTenor" data-val="${t}">${t} Bulan</button>`).join('')}
                     </div>
                     ${state.tenor > 0 ? `
                         <div class="flex justify-between items-center" style="border-top:1px dashed var(--border); padding-top:10px;">
@@ -1411,63 +1672,63 @@ function renderAdminPemasangan(container) {
                 </div>
              </div>
           `;
-          
-          document.getElementById('cardCash').onclick = () => { state.metode = 'cash'; updateWizard(); };
-          document.getElementById('cardCicilan').onclick = () => { state.metode = 'cicilan'; if(state.tenor===0) state.tenor=6; updateWizard(); };
-          
-          document.querySelectorAll('.btnTenor').forEach(btn => {
-             btn.onclick = (e) => { state.tenor = Number(e.target.dataset.val); updateWizard(); }
+
+      document.getElementById('cardCash').onclick = () => { state.metode = 'cash'; updateWizard(); };
+      document.getElementById('cardCicilan').onclick = () => { state.metode = 'cicilan'; if (state.tenor === 0) state.tenor = 6; updateWizard(); };
+
+      document.querySelectorAll('.btnTenor').forEach(btn => {
+        btn.onclick = (e) => { state.tenor = Number(e.target.dataset.val); updateWizard(); }
+      });
+
+      document.getElementById('btnPrev3').onclick = () => { currentStep--; updateWizard(); };
+      document.getElementById('btnNext3').onclick = () => {
+        if (state.metode === 'cicilan' && state.tenor === 0) return showToast('Pilih tenor cicilan!', 'error');
+
+        // Process Saving
+        const spkDB = getDB(STORAGE.spk);
+        const installmentDB = getDB(STORAGE.installments);
+        const spkId = `SPK-${Date.now().toString().slice(-6)}`;
+
+        const m = getDB(STORAGE.members).find(x => x.id === state.memberId);
+
+        // Save Cicilan if any
+        if (state.metode === 'cicilan') {
+          const now = new Date();
+          installmentDB.push({
+            id: `CIL-${m.id}`,
+            memberId: m.id,
+            totalAmount: state.biaya,
+            tenure: state.tenor,
+            monthlyAmount: Math.ceil(state.biaya / state.tenor),
+            monthsPaid: 0,
+            startYear: now.getFullYear(),
+            startMonth: now.getMonth() + 1, // Will start billing this/next month depending on logic
+            status: 'active'
           });
-          
-          document.getElementById('btnPrev3').onclick = () => { currentStep--; updateWizard(); };
-          document.getElementById('btnNext3').onclick = () => {
-             if(state.metode === 'cicilan' && state.tenor === 0) return showToast('Pilih tenor cicilan!', 'error');
-             
-             // Process Saving
-             const spkDB = getDB(STORAGE.spk);
-             const installmentDB = getDB(STORAGE.installments);
-             const spkId = `SPK-${Date.now().toString().slice(-6)}`;
-             
-             const m = getDB(STORAGE.members).find(x => x.id === state.memberId);
-             
-             // Save Cicilan if any
-             if (state.metode === 'cicilan') {
-                 const now = new Date();
-                 installmentDB.push({
-                     id: `CIL-${m.id}`,
-                     memberId: m.id,
-                     totalAmount: state.biaya,
-                     tenure: state.tenor,
-                     monthlyAmount: Math.ceil(state.biaya / state.tenor),
-                     monthsPaid: 0,
-                     startYear: now.getFullYear(),
-                     startMonth: now.getMonth() + 1, // Will start billing this/next month depending on logic
-                     status: 'active'
-                 });
-                 saveDB(STORAGE.installments, installmentDB);
-             }
-             
-             // Save SPK
-             spkDB.push({
-                 id: spkId,
-                 memberId: m.id,
-                 fee: state.biaya,
-                 method: state.metode,
-                 status: 'pending',
-                 createdAt: new Date().toISOString()
-             });
-             saveDB(STORAGE.spk, spkDB);
-             
-             logAction('buat_spk', `Menerbitkan SPK pemasangan utk ${m.fullName}`);
-             
-             state.spkIdResult = spkId;
-             currentStep++;
-             updateWizard();
-          };
-      }
-      else if (currentStep === 4) {
-          const m = getDB(STORAGE.members).find(x => x.id === state.memberId);
-          content.innerHTML = `
+          saveDB(STORAGE.installments, installmentDB);
+        }
+
+        // Save SPK
+        spkDB.push({
+          id: spkId,
+          memberId: m.id,
+          fee: state.biaya,
+          method: state.metode,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+        saveDB(STORAGE.spk, spkDB);
+
+        logAction('buat_spk', `Menerbitkan SPK pemasangan utk ${m.fullName}`);
+
+        state.spkIdResult = spkId;
+        currentStep++;
+        updateWizard();
+      };
+    }
+    else if (currentStep === 4) {
+      const m = getDB(STORAGE.members).find(x => x.id === state.memberId);
+      content.innerHTML = `
              <div class="text-center" style="max-width:500px; margin: 0 auto; padding: 20px;">
                 <div style="width:80px; height:80px; background:var(--accent-success); border-radius:50%; color:white; font-size:3rem; display:grid; place-items:center; margin:0 auto 20px auto; animation: fadeSlideUp 0.5s ease;">
                    <i class="fas fa-check"></i>
@@ -1501,26 +1762,26 @@ function renderAdminPemasangan(container) {
                 </div>
              </div>
           `;
-          document.getElementById('btnFinish').onclick = () => { window.location.hash = '#dashboard'; };
-      }
+      document.getElementById('btnFinish').onclick = () => { window.location.hash = '#dashboard'; };
+    }
   };
-  
+
   updateWizard();
 }
 
 function renderAdminPencatatan(container) {
   updateTopbarTitle('Review Pencatatan');
-  
+
   const now = new Date();
   const state = { month: now.getMonth() + 1, year: now.getFullYear() };
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in">
        <div class="flex gap-4 mb-4" style="align-items:flex-end;">
           <div class="form-group mb-0" style="width:150px;">
              <label>Bulan (Pencatatan)</label>
              <select id="fltMonth">
-                ${[...Array(12).keys()].map(i => `<option value="${i+1}" ${state.month === i+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('id-ID', {month:'long'})}</option>`).join('')}
+                ${[...Array(12).keys()].map(i => `<option value="${i + 1}" ${state.month === i + 1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('id-ID', { month: 'long' })}</option>`).join('')}
              </select>
           </div>
           <div class="form-group mb-0" style="width:120px;">
@@ -1547,59 +1808,57 @@ function renderAdminPencatatan(container) {
        </div>
     </div>
   `;
-  
+
   const loadData = () => {
-      const usages = getDB(STORAGE.usage).filter(u => u.month === state.month && u.year === state.year);
-      const members = getDB(STORAGE.members);
-      
-      const tbody = document.getElementById('catatTbody');
-      
-      if(members.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Belum ada pelanggan terdaftar</td></tr>`;
-          return;
+    const tbody = document.getElementById('catatTbody');
+    const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
+    const usages = getDB(STORAGE.usage);
+
+    if (members.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Belum ada pelanggan terdaftar</td></tr>`;
+      return;
+    }
+
+    let html = '';
+    members.forEach(m => {
+      const u = usages.find(x => x.memberId === m.id && x.year === state.year && x.month === state.month);
+
+      if (u) {
+        html += `
+                  <tr>
+                     <td data-label="Pelanggan"><b>${m.fullName}</b><br><small class="text-muted">${m.id} - ${m.zone}</small></td>
+                     <td data-label="Bulan Lalu">${u.prevReading} m³</td>
+                     <td data-label="Bulan Ini" class="font-bold text-primary">${u.currentReading} m³</td>
+                     <td data-label="Beban" class="text-warning">${u.volume} m³</td>
+                     <td data-label="Foto">
+                       ${u.photoData ? `<img src="${u.photoData}" style="width:50px; height:50px; object-fit:cover; border-radius:6px; cursor:pointer;" onclick="window.open(this.src)"/>` : '<span class="text-muted text-sm">--</span>'}
+                     </td>
+                     <td data-label="Status"><span class="badge badge-success"><i class="fas fa-check"></i> Selesai</span></td>
+                  </tr>
+                `;
+      } else {
+        html += `
+                  <tr>
+                     <td data-label="Pelanggan"><b>${m.fullName}</b><br><small class="text-muted">${m.id} - ${m.zone}</small></td>
+                     <td data-label="Bulan Lalu" class="text-muted">--</td>
+                     <td data-label="Bulan Ini" class="text-muted">--</td>
+                     <td data-label="Beban" class="text-muted">--</td>
+                     <td data-label="Foto"><span class="text-muted">--</span></td>
+                     <td data-label="Status"><span class="badge badge-warning"><i class="fas fa-clock"></i> Belum</span></td>
+                  </tr>
+                `;
       }
-      
-      let html = '';
-      members.forEach(m => {
-          if (m.status === 'nonaktif') return;
-          const u = usages.find(x => x.memberId === m.id);
-          
-          if (u) {
-              html += `
-                <tr>
-                   <td data-label="Pelanggan"><b>${m.fullName}</b><br><small class="text-muted">${m.id} - ${m.zone}</small></td>
-                   <td data-label="Bulan Lalu">${u.prevReading} m³</td>
-                   <td data-label="Bulan Ini" class="font-bold text-primary">${u.currentReading} m³</td>
-                   <td data-label="Beban" class="text-warning">${u.volume} m³</td>
-                   <td data-label="Foto">
-                     ${u.photoData ? `<img src="${u.photoData}" style="width:50px; height:50px; object-fit:cover; border-radius:6px; cursor:pointer;" onclick="window.open('${u.photoData}')"/>` : '<span class="text-muted text-sm">--</span>'}
-                   </td>
-                   <td data-label="Status"><span class="badge badge-success"><i class="fas fa-check"></i> Selesai</span></td>
-                </tr>
-              `;
-          } else {
-              html += `
-                <tr>
-                   <td data-label="Pelanggan"><b>${m.fullName}</b><br><small class="text-muted">${m.id} - ${m.zone}</small></td>
-                   <td data-label="Bulan Lalu" class="text-muted">--</td>
-                   <td data-label="Bulan Ini" class="text-muted">--</td>
-                   <td data-label="Beban" class="text-muted">--</td>
-                   <td data-label="Foto"><span class="text-muted">--</span></td>
-                   <td data-label="Status"><span class="badge badge-warning"><i class="fas fa-clock"></i> Belum</span></td>
-                </tr>
-              `;
-          }
-      });
-      
-      tbody.innerHTML = html || `<tr><td colspan="6" class="text-center">Tidak ada data aktif</td></tr>`;
+    });
+
+    tbody.innerHTML = html || `<tr><td colspan="6" class="text-center">Tidak ada data aktif</td></tr>`;
   };
-  
+
   document.getElementById('btnFilterCatat').onclick = () => {
-      state.month = Number(document.getElementById('fltMonth').value);
-      state.year = Number(document.getElementById('fltYear').value);
-      loadData();
+    state.month = Number(document.getElementById('fltMonth').value);
+    state.year = Number(document.getElementById('fltYear').value);
+    loadData();
   };
-  
+
   loadData();
 }
 
@@ -1607,13 +1866,13 @@ function renderAdminTagihan(container) {
   updateTopbarTitle('Generate & Kelola Tagihan');
   const now = new Date();
   const state = { month: now.getMonth() + 1, year: now.getFullYear() };
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in mb-4 text-center" style="background:var(--surface);">
        <h3 class="mb-2">Periode Tagihan Aktif</h3>
        <div class="flex justify-center gap-2 items-center" style="flex-wrap:wrap;">
           <select id="tghMonth" style="width:150px;">
-              ${[...Array(12).keys()].map(i => `<option value="${i+1}" ${state.month === i+1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('id-ID', {month:'long'})}</option>`).join('')}
+              ${[...Array(12).keys()].map(i => `<option value="${i + 1}" ${state.month === i + 1 ? 'selected' : ''}>${new Date(0, i).toLocaleString('id-ID', { month: 'long' })}</option>`).join('')}
           </select>
           <input type="number" id="tghYear" value="${state.year}" style="width:100px;" />
           <button class="btn btn-primary" id="btnRefreshTgh"><i class="fas fa-sync"></i> Refresh</button>
@@ -1648,256 +1907,477 @@ function renderAdminTagihan(container) {
        </div>
        
        <div class="flex justify-between mt-4" style="flex-wrap:wrap; gap:8px;">
-          <div class="text-muted" style="font-size:0.85rem;"><i class="fas fa-info-circle"></i> 📄 Unduh PDF &nbsp;|&nbsp; 💬 Kirim via WhatsApp &nbsp;|&nbsp; Klik 'Bayar' untuk konfirmasi</div>
+          <div class="text-muted" style="font-size:0.85rem;"><i class="fas fa-info-circle"></i> 📄 Unduh PDF &nbsp;|&nbsp; ✏️ Edit Tagihan &nbsp;|&nbsp; 💬 Kirim via WhatsApp &nbsp;|&nbsp; Klik 'Bayar' untuk konfirmasi</div>
           <div id="tagihanSummary" class="text-muted" style="font-size:0.85rem;"></div>
        </div>
     </div>
+
+    <!-- Modal Edit Tagihan -->
+    <div id="editBillModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:1000; align-items:center; justify-content:center; padding:20px;">
+      <div class="card edit-bill-card" style="width:100%; max-width:520px; animation: fadeSlideUp 0.3s ease; position:relative; overflow:visible;">
+        <div class="flex justify-between items-center mb-4">
+          <h3 style="margin:0; display:flex; align-items:center; gap:8px;"><i class="fas fa-edit text-info"></i> Koreksi Tagihan</h3>
+          <button class="btn-icon" id="btnCloseEditBill" style="background:var(--surface); border:1px solid var(--border); border-radius:50%; width:32px; height:32px; display:grid; place-items:center; cursor:pointer; color:var(--text-secondary); transition:all 0.2s;"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div id="editBillMemberInfo" style="background:var(--surface); padding:12px 16px; border-radius:var(--radius-md); margin-bottom:16px; border-left:4px solid var(--accent-primary);">
+          <!-- Filled dynamically -->
+        </div>
+
+        <form id="editBillForm">
+          <input type="hidden" id="editBillMemberId" />
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div class="form-group">
+              <label><i class="fas fa-tachometer-alt text-muted"></i> Meteran Awal (m³)</label>
+              <input type="number" id="editPrevReading" min="0" step="1" required class="edit-bill-input" />
+            </div>
+            <div class="form-group">
+              <label><i class="fas fa-tachometer-alt text-info"></i> Meteran Akhir (m³)</label>
+              <input type="number" id="editCurrentReading" min="0" step="1" required class="edit-bill-input" />
+            </div>
+          </div>
+
+          <div id="editBillPreview" style="background:linear-gradient(135deg, rgba(59,130,246,0.08), rgba(6,182,212,0.08)); padding:16px; border-radius:var(--radius-md); margin:12px 0 20px 0; border:1px solid rgba(59,130,246,0.15);">
+            <!-- Live preview filled by JS -->
+          </div>
+
+          <div class="flex justify-between" style="gap:10px;">
+            <button type="button" class="btn btn-outline" id="btnCancelEditBill" style="flex:1;"><i class="fas fa-times"></i> Batal</button>
+            <button type="submit" class="btn btn-primary" style="flex:1;"><i class="fas fa-save"></i> Simpan Koreksi</button>
+          </div>
+        </form>
+      </div>
+    </div>
   `;
-  
+
   // Cache the computed billing data for reuse by PDF/WA buttons
   let billingCache = [];
-  
+
   const loadTagihan = () => {
-      const usages = getDB(STORAGE.usage).filter(u => u.month === state.month && u.year === state.year);
-      const payments = getDB(STORAGE.payments).filter(p => p.month === state.month && p.year === state.year);
-      const installments = getDB(STORAGE.installments);
-      const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
-      
-      const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
-      const adminFee = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
-      
-      const tbody = document.getElementById('tagihanTbody');
-      
-      if(members.length === 0) return tbody.innerHTML = `<tr><td colspan="7" class="text-center">Belum ada pelanggan.</td></tr>`;
-      
-      billingCache = []; // reset
-      let html = '';
-      let totalPaid = 0;
-      let totalUnpaid = 0;
-      
-      members.forEach(m => {
-          const u = usages.find(x => x.memberId === m.id);
-          const p = payments.find(x => x.memberId === m.id);
-          const activeCicilan = installments.find(i => i.memberId === m.id && i.status === 'active');
-          
-          if (!u) {
-             html += `
-               <tr>
-                 <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
-                 <td colspan="4" class="text-center text-muted" style="font-style:italic">Menunggu petugas mencatat meteran...</td>
-                 <td data-label="Status"><span class="badge badge-warning">Pending</span></td>
-                 <td data-label="Aksi">-</td>
-               </tr>
-             `;
-             return;
-          }
-          
-          const biayaAir = u.volume * rate;
-          
-          let biayaCicilan = 0;
-          let cicilanInfo = null;
-          if (activeCicilan) {
-             const start = new Date(activeCicilan.startYear, activeCicilan.startMonth - 1, 1);
-             const current = new Date(state.year, state.month - 1, 1);
-             const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
-             
-             if (diffMonths >= 0 && diffMonths < activeCicilan.tenure) {
-                 biayaCicilan = activeCicilan.monthlyAmount;
-                 cicilanInfo = { bulanKe: diffMonths + 1, tenure: activeCicilan.tenure };
-             }
-          }
-          
-          const total = biayaAir + adminFee + biayaCicilan;
-          const isPaid = p !== null;
-          
-          // Store in cache for PDF/WA use
-          const billEntry = {
-            member: m,
-            invoiceId: isPaid ? p.id : `INV-${m.id}-${state.year}-${state.month}`,
-            month: state.month,
-            year: state.year,
-            prevReading: u.prevReading,
-            currentReading: u.currentReading,
-            volume: u.volume,
-            biayaAir,
-            biayaBeban: adminFee,
-            biayaCicilan,
-            total,
-            isPaid,
-            paidAt: isPaid ? p.paidAt : null,
-            cicilanInfo
-          };
-          billingCache.push(billEntry);
-          
-          // Action buttons (PDF + WA) for each row
-          const actionBtns = `
-            <div class="action-btns">
-              <button class="btn-action btn-pdf" title="Unduh PDF" onclick="downloadStruk('${m.id}')"><i class="fas fa-file-pdf"></i></button>
-              <button class="btn-action btn-wa" title="Kirim via WhatsApp" onclick="sendWA('${m.id}')"><i class="fab fa-whatsapp"></i></button>
-              ${!isPaid ? `<button class="btn btn-success btn-sm" style="padding:4px 10px; font-size:0.8rem;" onclick="terimaBayar('${m.id}', ${biayaAir}, ${biayaCicilan}, ${adminFee}, ${total})"><i class="fas fa-check"></i> Bayar</button>` : ''}
-            </div>
-          `;
-          
-          if (isPaid) {
-              totalPaid++;
-              html += `
-               <tr>
-                 <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
-                 <td data-label="Biaya Air">${formatRp(biayaAir)}</td>
-                 <td data-label="Cicilan">${biayaCicilan ? formatRp(biayaCicilan) : '--'}</td>
-                 <td data-label="Beban">${formatRp(adminFee)}</td>
-                 <td data-label="Total"><b class="text-success">${formatRp(total)}</b></td>
-                 <td data-label="Status"><span class="badge badge-success">LUNAS</span><br><small>${formatDate(p.paidAt)}</small></td>
-                 <td data-label="Aksi">${actionBtns}</td>
-               </tr>
-             `;
-          } else {
-              totalUnpaid++;
-              html += `
-               <tr>
-                 <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
-                 <td data-label="Biaya Air">${formatRp(biayaAir)}</td>
-                 <td data-label="Cicilan" class="${biayaCicilan ? 'text-warning' : ''}">${biayaCicilan ? formatRp(biayaCicilan) : '--'}</td>
-                 <td data-label="Beban">${formatRp(adminFee)}</td>
-                 <td data-label="Total"><b class="text-danger">${formatRp(total)}</b></td>
-                 <td data-label="Status"><span class="badge badge-danger">BELUM BAYAR</span></td>
-                 <td data-label="Aksi">${actionBtns}</td>
-               </tr>
-             `;
-          }
-      });
-      
-      tbody.innerHTML = html;
-      
-      // Summary
-      const summaryEl = document.getElementById('tagihanSummary');
-      if (summaryEl) {
-        summaryEl.innerHTML = `<span class="text-success">${totalPaid} lunas</span> · <span class="text-danger">${totalUnpaid} belum bayar</span> · <span>${billingCache.length} tertagih</span>`;
+    const tbody = document.getElementById('tagihanTbody');
+    const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
+    const usages = getDB(STORAGE.usage);
+    const paymentsDB = getDB(STORAGE.payments);
+    const installmentsDB = getDB(STORAGE.installments);
+    const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+    const beban = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
+
+    if (members.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center">Belum ada pelanggan aktif.</td></tr>`;
+      return;
+    }
+
+    billingCache = [];
+    let html = '';
+    let totalPaid = 0;
+    let totalUnpaid = 0;
+    let totalBilled = 0;
+
+    members.forEach(m => {
+      const usage = usages.find(u => u.memberId === m.id && u.year === state.year && u.month === state.month);
+      const payment = paymentsDB.find(p => p.memberId === m.id && p.year === state.year && p.month === state.month);
+      const installment = installmentsDB.find(i => i.memberId === m.id && i.status === 'active');
+
+      const isBilled = !!usage;
+      const isPaid = !!payment;
+
+      if (!isBilled) {
+        html += `
+                 <tr>
+                   <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
+                   <td colspan="4" class="text-center text-muted" style="font-style:italic">Menunggu petugas mencatat meteran...</td>
+                   <td data-label="Status"><span class="badge badge-warning">Pending</span></td>
+                   <td data-label="Aksi">-</td>
+                 </tr>
+               `;
+        return;
       }
+
+      totalBilled++;
+      const biayaAir = usage.volume * rate;
+      let biayaCicilan = 0;
+      let cicilanInfo = null;
+
+      if (installment) {
+        const start = new Date(installment.startYear, installment.startMonth - 1, 1);
+        const current = new Date(state.year, state.month - 1, 1);
+        const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
+        if (diffMonths >= 0 && diffMonths < installment.tenure) {
+          biayaCicilan = installment.monthlyAmount;
+          cicilanInfo = { bulanKe: diffMonths + 1, tenure: installment.tenure };
+        }
+      }
+
+      const total = biayaAir + beban + biayaCicilan;
+
+      const billEntry = {
+        member: m,
+        invoiceId: isPaid ? (payment.id || `PAY-${m.id}`) : `INV-${m.id}-${state.year}-${state.month}`,
+        month: state.month,
+        year: state.year,
+        prevReading: usage.prevReading,
+        currentReading: usage.currentReading,
+        volume: usage.volume,
+        biayaAir,
+        biayaBeban: beban,
+        biayaCicilan,
+        total,
+        isPaid,
+        paidAt: isPaid ? payment.paidAt : null,
+        cicilanInfo
+      };
+      billingCache.push(billEntry);
+
+      if (isPaid) totalPaid++;
+      else totalUnpaid++;
+
+      const actionBtns = `
+              <div class="action-btns">
+                <button class="btn-action btn-edit" title="Edit / Koreksi Tagihan" onclick="editBill('${m.id}')"><i class="fas fa-edit"></i></button>
+                <button class="btn-action btn-pdf" title="Unduh PDF" onclick="downloadStruk('${m.id}')"><i class="fas fa-file-pdf"></i></button>
+                <button class="btn-action btn-wa" title="Kirim via WhatsApp" onclick="sendWA('${m.id}')"><i class="fab fa-whatsapp"></i></button>
+                ${!isPaid ? `<button class="btn btn-success btn-sm" style="padding:4px 10px; font-size:0.8rem;" onclick="terimaBayar('${m.id}', ${biayaAir}, ${biayaCicilan}, ${beban}, ${total})"><i class="fas fa-check"></i> Bayar</button>` : ''}
+              </div>
+            `;
+
+      if (isPaid) {
+        html += `
+                 <tr>
+                   <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
+                   <td data-label="Biaya Air">${formatRp(biayaAir)}</td>
+                   <td data-label="Cicilan">${biayaCicilan ? formatRp(biayaCicilan) : '--'}</td>
+                   <td data-label="Beban">${formatRp(beban)}</td>
+                   <td data-label="Total"><b class="text-success">${formatRp(total)}</b></td>
+                   <td data-label="Status"><span class="badge badge-success">LUNAS</span><br><small>${formatDate(payment.paidAt)}</small></td>
+                   <td data-label="Aksi">${actionBtns}</td>
+                 </tr>
+               `;
+      } else {
+        html += `
+                 <tr>
+                   <td data-label="Pelanggan"><b>${m.fullName}</b><small class="block text-muted">${m.id}</small></td>
+                   <td data-label="Biaya Air">${formatRp(biayaAir)}</td>
+                   <td data-label="Cicilan" class="${biayaCicilan ? 'text-warning' : ''}">${biayaCicilan ? formatRp(biayaCicilan) : '--'}</td>
+                   <td data-label="Beban">${formatRp(beban)}</td>
+                   <td data-label="Total"><b class="text-danger">${formatRp(total)}</b></td>
+                   <td data-label="Status"><span class="badge badge-danger">BELUM BAYAR</span></td>
+                   <td data-label="Aksi">${actionBtns}</td>
+                 </tr>
+               `;
+      }
+    });
+
+    tbody.innerHTML = html;
+
+    const summaryEl = document.getElementById('tagihanSummary');
+    if (summaryEl) {
+      summaryEl.innerHTML = `<span class="text-success">${totalPaid} lunas</span> · <span class="text-danger">${totalUnpaid} belum bayar</span> · <span>${totalBilled} tertagih</span>`;
+    }
   };
-  
+
   document.getElementById('btnRefreshTgh').onclick = () => {
-      state.month = Number(document.getElementById('tghMonth').value);
-      state.year = Number(document.getElementById('tghYear').value);
-      loadTagihan();
+    state.month = Number(document.getElementById('tghMonth').value);
+    state.year = Number(document.getElementById('tghYear').value);
+    loadTagihan();
   };
-  
-  // --- Download PDF Receipt ---
-  window.downloadStruk = (memberId) => {
-      const entry = billingCache.find(b => b.member.id === memberId);
-      if (!entry) return showToast('Data tagihan tidak ditemukan', 'error');
-      
-      const doc = generateReceiptPDF({
-        invoiceId: entry.invoiceId,
-        memberName: entry.member.fullName,
-        memberId: entry.member.id,
-        zone: entry.member.zone,
-        address: entry.member.address,
-        month: entry.month,
-        year: entry.year,
-        prevReading: entry.prevReading,
-        currentReading: entry.currentReading,
-        volume: entry.volume,
-        biayaAir: entry.biayaAir,
-        biayaBeban: entry.biayaBeban,
-        biayaCicilan: entry.biayaCicilan,
-        total: entry.total,
-        isPaid: entry.isPaid,
-        paidAt: entry.paidAt,
-        cicilanInfo: entry.cicilanInfo
+
+  // --- Download PDF Receipt (via PyMuPDF backend) ---
+  window.downloadStruk = async (memberId) => {
+    const entry = billingCache.find(b => b.member.id === memberId);
+    if (!entry) return showToast('Data tagihan tidak ditemukan', 'error');
+
+    const payload = {
+      invoiceId: entry.invoiceId,
+      memberName: entry.member.fullName,
+      memberId: entry.member.id,
+      zone: entry.member.zone,
+      address: entry.member.address,
+      phone: entry.member.phone || '-',
+      month: entry.month,
+      year: entry.year,
+      prevReading: entry.prevReading,
+      currentReading: entry.currentReading,
+      volume: entry.volume,
+      rate: Number(localStorage.getItem(STORAGE.rate)) || 2100,
+      biayaAir: entry.biayaAir,
+      biayaBeban: entry.biayaBeban,
+      biayaCicilan: entry.biayaCicilan,
+      total: entry.total,
+      isPaid: entry.isPaid,
+      paidAt: entry.paidAt,
+      cicilanInfo: entry.cicilanInfo
+    };
+
+    const filename = `Invoice_${entry.member.id}_${monthName(entry.month)}_${entry.year}.pdf`;
+
+    try {
+      // Try PyMuPDF backend first
+      const res = await fetch('http://localhost:5050/api/invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      
-      const filename = `Kwitansi_${entry.member.id}_${monthName(entry.month)}_${entry.year}.pdf`;
-      doc.save(filename);
+
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
       showToast(`PDF berhasil diunduh: ${filename}`);
-      logAction('pdf', `Download PDF ${entry.member.fullName} (${monthName(entry.month)} ${entry.year})`);
+    } catch (err) {
+      console.warn('PyMuPDF server unavailable, falling back to jsPDF:', err.message);
+      // Fallback to client-side jsPDF
+      try {
+        const doc = generateReceiptPDF(payload);
+        doc.save(filename);
+        showToast(`PDF diunduh (fallback): ${filename}`);
+      } catch (e2) {
+        showToast('Gagal membuat PDF. Pastikan server invoice aktif.', 'error');
+        return;
+      }
+    }
+
+    logAction('pdf', `Download PDF ${entry.member.fullName} (${monthName(entry.month)} ${entry.year})`);
   };
-  
+
   // --- Send via WhatsApp ---
   window.sendWA = (memberId) => {
-      const entry = billingCache.find(b => b.member.id === memberId);
-      if (!entry) return showToast('Data tagihan tidak ditemukan', 'error');
-      
-      if (!entry.member.phone) {
-        return showToast('Nomor HP warga belum diisi!', 'error');
-      }
-      
-      sendViaWhatsApp(entry.member, {
-        month: entry.month,
-        year: entry.year,
-        volume: entry.volume,
-        biayaAir: entry.biayaAir,
-        biayaBeban: entry.biayaBeban,
-        biayaCicilan: entry.biayaCicilan,
-        total: entry.total,
-        isPaid: entry.isPaid
-      });
-      
-      showToast(`WhatsApp dibuka untuk ${entry.member.fullName}`);
-      logAction('wa_send', `Kirim WA ke ${entry.member.fullName} (${monthName(entry.month)} ${entry.year})`);
+    const entry = billingCache.find(b => b.member.id === memberId);
+    if (!entry) return showToast('Data tagihan tidak ditemukan', 'error');
+
+    if (!entry.member.phone) {
+      return showToast('Nomor HP warga belum diisi!', 'error');
+    }
+
+    sendViaWhatsApp(entry.member, {
+      month: entry.month,
+      year: entry.year,
+      volume: entry.volume,
+      biayaAir: entry.biayaAir,
+      biayaBeban: entry.biayaBeban,
+      biayaCicilan: entry.biayaCicilan,
+      total: entry.total,
+      isPaid: entry.isPaid
+    });
+
+    showToast(`WhatsApp dibuka untuk ${entry.member.fullName}`);
+    logAction('wa_send', `Kirim WA ke ${entry.member.fullName} (${monthName(entry.month)} ${entry.year})`);
   };
-  
+
   // --- Terima Bayar ---
   window.terimaBayar = (memberId, bAir, bCicilan, bBeban, total) => {
-      if(!confirm(`Terima pembayaran dari ${memberId} sejumlah ${formatRp(total)}?`)) return;
-      
-      const payments = getDB(STORAGE.payments);
-      const payId = `PAY-${Date.now()}`;
-      
-      payments.push({
-          id: payId,
-          memberId,
-          year: state.year,
-          month: state.month,
-          amountAir: bAir,
-          amountCicilan: bCicilan,
-          amountBeban: bBeban,
-          total: total,
-          paidAt: new Date().toISOString()
-      });
-      saveDB(STORAGE.payments, payments);
-      
-      // Update cicilan progress tracking if needed
-      if(bCicilan > 0) {
-          const installments = getDB(STORAGE.installments);
-          const activeCicilan = installments.find(i => i.memberId === memberId && i.status === 'active');
-          if(activeCicilan) {
-             activeCicilan.monthsPaid += 1;
-             if(activeCicilan.monthsPaid >= activeCicilan.tenure) {
-                 activeCicilan.status = 'completed';
-             }
-             saveDB(STORAGE.installments, installments);
-          }
+    if (!confirm(`Terima pembayaran dari ${memberId} sejumlah ${formatRp(total)}?`)) return;
+
+    const paymentsDB = getDB(STORAGE.payments);
+    paymentsDB.push({
+      id: `PAY-${Date.now().toString().slice(-8)}`,
+      memberId,
+      year: state.year,
+      month: state.month,
+      amountAir: bAir,
+      amountBeban: bBeban,
+      amountCicilan: bCicilan,
+      total: total,
+      paidAt: new Date().toISOString()
+    });
+    saveDB(STORAGE.payments, paymentsDB);
+
+    // Update installment monthsPaid if applicable
+    if (bCicilan > 0) {
+      const installmentsDB = getDB(STORAGE.installments);
+      const inst = installmentsDB.find(i => i.memberId === memberId && i.status === 'active');
+      if (inst) {
+        inst.monthsPaid = (inst.monthsPaid || 0) + 1;
+        if (inst.monthsPaid >= inst.tenure) inst.status = 'completed';
+        saveDB(STORAGE.installments, installmentsDB);
       }
-      
-      logAction('bayar', `Terima bayar tagihan ${memberId} (${formatRp(total)})`);
-      showToast('Pembayaran berhasil diproses!');
-      loadTagihan();
+    }
+
+    logAction('bayar', `Menerima pembayaran ${memberId} sebesar ${formatRp(total)}`);
+    showToast('Pembayaran berhasil diproses!');
+    loadTagihan();
   };
-  
+
+  // --- Edit Bill Modal ---
+  const editBillModal = document.getElementById('editBillModal');
+  const editBillForm = document.getElementById('editBillForm');
+
+  const openEditBillModal = () => { editBillModal.style.display = 'flex'; };
+  const closeEditBillModal = () => { editBillModal.style.display = 'none'; editBillForm.reset(); };
+
+  document.getElementById('btnCloseEditBill').onclick = closeEditBillModal;
+  document.getElementById('btnCancelEditBill').onclick = closeEditBillModal;
+
+  // Close on backdrop click
+  editBillModal.onclick = (e) => { if (e.target === editBillModal) closeEditBillModal(); };
+
+  // Live preview updater
+  const updateEditBillPreview = () => {
+    const prev = Number(document.getElementById('editPrevReading').value) || 0;
+    const curr = Number(document.getElementById('editCurrentReading').value) || 0;
+    const vol = Math.max(0, curr - prev);
+    const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+    const beban = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
+    const memberId = document.getElementById('editBillMemberId').value;
+
+    let biayaCicilan = 0;
+    const installmentsDB = getDB(STORAGE.installments);
+    const installment = installmentsDB.find(i => i.memberId === memberId && i.status === 'active');
+    if (installment) {
+      const start = new Date(installment.startYear, installment.startMonth - 1, 1);
+      const current = new Date(state.year, state.month - 1, 1);
+      const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
+      if (diffMonths >= 0 && diffMonths < installment.tenure) {
+        biayaCicilan = installment.monthlyAmount;
+      }
+    }
+
+    const biayaAir = vol * rate;
+    const total = biayaAir + beban + biayaCicilan;
+
+    const previewEl = document.getElementById('editBillPreview');
+    previewEl.innerHTML = `
+      <div style="font-size:0.8rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--accent-info); margin-bottom:10px;"><i class="fas fa-calculator"></i> Kalkulasi Otomatis</div>
+      <div class="flex justify-between mb-2" style="font-size:0.9rem;">
+        <span class="text-secondary">Pemakaian</span>
+        <span class="font-semibold ${vol < 0 ? 'text-danger' : ''}">${vol} m³</span>
+      </div>
+      <div class="flex justify-between mb-2" style="font-size:0.9rem;">
+        <span class="text-secondary">Biaya Air (${vol} × ${formatRp(rate)})</span>
+        <span class="font-semibold">${formatRp(biayaAir)}</span>
+      </div>
+      <div class="flex justify-between mb-2" style="font-size:0.9rem;">
+        <span class="text-secondary">Beban/Perawatan</span>
+        <span class="font-semibold">${formatRp(beban)}</span>
+      </div>
+      ${biayaCicilan > 0 ? `
+      <div class="flex justify-between mb-2" style="font-size:0.9rem;">
+        <span class="text-secondary">Cicilan Pemasangan</span>
+        <span class="font-semibold text-warning">${formatRp(biayaCicilan)}</span>
+      </div>` : ''}
+      <div style="border-top:1px dashed var(--border); margin:8px 0; padding-top:8px;" class="flex justify-between">
+        <span class="font-bold" style="font-size:1rem; color:var(--text-primary);">Total Tagihan</span>
+        <span class="font-bold" style="font-size:1.1rem; color:var(--accent-primary);">${formatRp(total)}</span>
+      </div>
+    `;
+  };
+
+  document.getElementById('editPrevReading').addEventListener('input', updateEditBillPreview);
+  document.getElementById('editCurrentReading').addEventListener('input', updateEditBillPreview);
+
+  window.editBill = (memberId) => {
+    const entry = billingCache.find(b => b.member.id === memberId);
+    if (!entry) return showToast('Data tagihan tidak ditemukan', 'error');
+
+    // Fill member info
+    document.getElementById('editBillMemberInfo').innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <div style="font-weight:700; font-size:1rem; color:var(--text-primary);">${entry.member.fullName}</div>
+          <div style="font-size:0.85rem; color:var(--text-muted);">${entry.member.id} — ${entry.member.zone}</div>
+        </div>
+        <div style="text-align:right;">
+          <span class="badge badge-info" style="font-size:0.8rem;">${monthName(state.month)} ${state.year}</span>
+          ${entry.isPaid ? '<br><span class="badge badge-success" style="margin-top:4px; font-size:0.75rem;">LUNAS</span>' : ''}
+        </div>
+      </div>
+    `;
+
+    // Fill form values
+    document.getElementById('editBillMemberId').value = memberId;
+    document.getElementById('editPrevReading').value = entry.prevReading;
+    document.getElementById('editCurrentReading').value = entry.currentReading;
+
+    // Update preview
+    updateEditBillPreview();
+
+    // Open modal
+    openEditBillModal();
+  };
+
+  editBillForm.onsubmit = (e) => {
+    e.preventDefault();
+    const memberId = document.getElementById('editBillMemberId').value;
+    const newPrev = Number(document.getElementById('editPrevReading').value);
+    const newCurr = Number(document.getElementById('editCurrentReading').value);
+
+    if (newCurr < newPrev) {
+      return showToast('Meteran akhir tidak boleh lebih kecil dari meteran awal!', 'error');
+    }
+
+    const newVolume = newCurr - newPrev;
+    const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+    const beban = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
+
+    // Update usage record
+    const usages = getDB(STORAGE.usage);
+    const usageIdx = usages.findIndex(u => u.memberId === memberId && u.year === state.year && u.month === state.month);
+    if (usageIdx === -1) {
+      return showToast('Data pencatatan tidak ditemukan!', 'error');
+    }
+
+    const oldUsage = usages[usageIdx];
+    usages[usageIdx] = { ...oldUsage, prevReading: newPrev, currentReading: newCurr, volume: newVolume };
+    saveDB(STORAGE.usage, usages);
+
+    // If already paid, also update the payment record totals
+    const paymentsDB = getDB(STORAGE.payments);
+    const paymentIdx = paymentsDB.findIndex(p => p.memberId === memberId && p.year === state.year && p.month === state.month);
+    if (paymentIdx !== -1) {
+      const newBiayaAir = newVolume * rate;
+      const installmentsDB = getDB(STORAGE.installments);
+      const installment = installmentsDB.find(i => i.memberId === memberId && i.status === 'active');
+      let biayaCicilan = 0;
+      if (installment) {
+        const start = new Date(installment.startYear, installment.startMonth - 1, 1);
+        const current = new Date(state.year, state.month - 1, 1);
+        const diffMonths = (current.getFullYear() - start.getFullYear()) * 12 + (current.getMonth() - start.getMonth());
+        if (diffMonths >= 0 && diffMonths < installment.tenure) {
+          biayaCicilan = installment.monthlyAmount;
+        }
+      }
+      const newTotal = newBiayaAir + beban + biayaCicilan;
+      paymentsDB[paymentIdx] = { ...paymentsDB[paymentIdx], amountAir: newBiayaAir, amountBeban: beban, amountCicilan: biayaCicilan, total: newTotal };
+      saveDB(STORAGE.payments, paymentsDB);
+    }
+
+    logAction('edit_tagihan', `Koreksi tagihan ${memberId}: meteran ${oldUsage.prevReading}→${newPrev} / ${oldUsage.currentReading}→${newCurr}, vol ${oldUsage.volume}→${newVolume} m³`);
+    showToast('Tagihan berhasil dikoreksi!');
+    closeEditBillModal();
+    loadTagihan();
+  };
+
   // --- Bulk Send via WhatsApp ---
   document.getElementById('btnBulkSendWA').onclick = () => {
-      // Get unpaid entries that have phone numbers
-      const targets = billingCache.filter(b => !b.isPaid && b.member.phone);
-      
-      if (targets.length === 0) {
-        return showToast('Tidak ada tagihan belum bayar yang bisa dikirim (atau nomor HP kosong).', 'error');
-      }
-      
-      const confirmed = confirm(
-        `Kirim tagihan via WhatsApp ke ${targets.length} warga yang belum bayar?\n\n` +
-        `Masing-masing akan membuka tab WhatsApp baru. ` +
-        `Pastikan pop-up browser tidak diblokir.\n\n` +
-        `Lanjutkan?`
-      );
-      
-      if (!confirmed) return;
-      
-      // Show progress overlay
-      const overlay = document.createElement('div');
-      overlay.className = 'bulk-send-overlay';
-      overlay.id = 'bulkSendOverlay';
-      overlay.innerHTML = `
+    // Get unpaid entries that have phone numbers
+    const targets = billingCache.filter(b => !b.isPaid && b.member.phone);
+
+    if (targets.length === 0) {
+      return showToast('Tidak ada tagihan belum bayar yang bisa dikirim (atau nomor HP kosong).', 'error');
+    }
+
+    const confirmed = confirm(
+      `Kirim tagihan via WhatsApp ke ${targets.length} warga yang belum bayar?\n\n` +
+      `Masing-masing akan membuka tab WhatsApp baru. ` +
+      `Pastikan pop-up browser tidak diblokir.\n\n` +
+      `Lanjutkan?`
+    );
+
+    if (!confirmed) return;
+
+    // Show progress overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'bulk-send-overlay';
+    overlay.id = 'bulkSendOverlay';
+    overlay.innerHTML = `
         <div class="bulk-send-card">
            <div class="spinner"></div>
            <h3 style="margin-bottom:5px;">Mengirim Tagihan via WhatsApp</h3>
@@ -1910,63 +2390,63 @@ function renderAdminTagihan(container) {
            <button class="btn btn-outline mt-4" id="btnCloseBulk" style="display:none;"><i class="fas fa-times"></i> Tutup</button>
         </div>
       `;
-      document.body.appendChild(overlay);
-      
-      const progressBar = document.getElementById('bulkProgress');
-      const counter = document.getElementById('bulkCounter');
-      const log = document.getElementById('bulkLog');
-      const closeBtn = document.getElementById('btnCloseBulk');
-      
-      let idx = 0;
-      
-      const sendNext = () => {
-        if (idx >= targets.length) {
-          // Done!
-          const spinner = overlay.querySelector('.spinner');
-          if (spinner) spinner.style.display = 'none';
-          counter.innerHTML = `<span class="text-success"><i class="fas fa-check-circle"></i> Selesai! ${targets.length} pesan dikirim.</span>`;
-          closeBtn.style.display = 'inline-flex';
-          closeBtn.onclick = () => overlay.remove();
-          logAction('wa_bulk', `Kirim bulk WA ke ${targets.length} warga (${monthName(state.month)} ${state.year})`);
-          return;
-        }
-        
-        const entry = targets[idx];
-        
-        // Open WhatsApp
-        sendViaWhatsApp(entry.member, {
-          month: entry.month,
-          year: entry.year,
-          volume: entry.volume,
-          biayaAir: entry.biayaAir,
-          biayaBeban: entry.biayaBeban,
-          biayaCicilan: entry.biayaCicilan,
-          total: entry.total,
-          isPaid: false
-        });
-        
-        idx++;
-        
-        // Update progress
-        const pct = Math.round((idx / targets.length) * 100);
-        progressBar.style.width = pct + '%';
-        counter.innerText = `${idx} / ${targets.length}`;
-        
-        log.innerHTML += `<div class="log-item log-success"><i class="fas fa-check-circle"></i> ${entry.member.fullName} (${entry.member.phone})</div>`;
-        log.scrollTop = log.scrollHeight;
-        
-        // Delay 3s before next (to avoid WA rate limit / popup block)
-        if (idx < targets.length) {
-          setTimeout(sendNext, 3000);
-        } else {
-          sendNext(); // Final call to show completed state
-        }
-      };
-      
-      // Start sending
-      setTimeout(sendNext, 500);
+    document.body.appendChild(overlay);
+
+    const progressBar = document.getElementById('bulkProgress');
+    const counter = document.getElementById('bulkCounter');
+    const log = document.getElementById('bulkLog');
+    const closeBtn = document.getElementById('btnCloseBulk');
+
+    let idx = 0;
+
+    const sendNext = () => {
+      if (idx >= targets.length) {
+        // Done!
+        const spinner = overlay.querySelector('.spinner');
+        if (spinner) spinner.style.display = 'none';
+        counter.innerHTML = `<span class="text-success"><i class="fas fa-check-circle"></i> Selesai! ${targets.length} pesan dikirim.</span>`;
+        closeBtn.style.display = 'inline-flex';
+        closeBtn.onclick = () => overlay.remove();
+        logAction('wa_bulk', `Kirim bulk WA ke ${targets.length} warga (${monthName(state.month)} ${state.year})`);
+        return;
+      }
+
+      const entry = targets[idx];
+
+      // Open WhatsApp
+      sendViaWhatsApp(entry.member, {
+        month: entry.month,
+        year: entry.year,
+        volume: entry.volume,
+        biayaAir: entry.biayaAir,
+        biayaBeban: entry.biayaBeban,
+        biayaCicilan: entry.biayaCicilan,
+        total: entry.total,
+        isPaid: false
+      });
+
+      idx++;
+
+      // Update progress
+      const pct = Math.round((idx / targets.length) * 100);
+      progressBar.style.width = pct + '%';
+      counter.innerText = `${idx} / ${targets.length}`;
+
+      log.innerHTML += `<div class="log-item log-success"><i class="fas fa-check-circle"></i> ${entry.member.fullName} (${entry.member.phone})</div>`;
+      log.scrollTop = log.scrollHeight;
+
+      // Delay 3s before next (to avoid WA rate limit / popup block)
+      if (idx < targets.length) {
+        setTimeout(sendNext, 3000);
+      } else {
+        sendNext(); // Final call to show completed state
+      }
+    };
+
+    // Start sending
+    setTimeout(sendNext, 500);
   };
-  
+
   loadTagihan();
 }
 
@@ -1974,7 +2454,7 @@ function renderAdminLaporan(container) {
   updateTopbarTitle('Laporan Keuangan');
   const now = new Date();
   const state = { year: now.getFullYear() };
-  
+
   container.innerHTML = `
      <div class="flex justify-between items-center mb-4">
         <div class="flex gap-2 items-center">
@@ -2008,95 +2488,95 @@ function renderAdminLaporan(container) {
         </table>
      </div>
   `;
-  
+
   const loadLaporan = () => {
-      const year = state.year;
-      const payments = getDB(STORAGE.payments).filter(p => p.year === year);
-      const usages = getDB(STORAGE.usage).filter(u => u.year === year);
-      
-      let totAir = 0, totBeban = 0, totCicilan = 0;
-      let bulanan = {};
-      
-      for(let i=1; i<=12; i++) {
-         bulanan[i] = { air: 0, beban: 0, cicilan: 0, piutang: 0 };
-      }
-      
-      payments.forEach(p => {
-          bulanan[p.month].air += p.amountAir || 0;
-          bulanan[p.month].beban += p.amountBeban || 0;
-          bulanan[p.month].cicilan += p.amountCicilan || 0;
-          
-          totAir += p.amountAir || 0;
-          totBeban += p.amountBeban || 0;
-          totCicilan += p.amountCicilan || 0;
+    const year = state.year;
+    const tbody = document.getElementById('lapTbody');
+    const paymentsDB = getDB(STORAGE.payments);
+    const usages = getDB(STORAGE.usage);
+    const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
+    const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
+    const adminFee = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
+
+    const totals = { air: 0, beban: 0, cicilan: 0, grandTotal: 0 };
+
+    let html = '';
+    for (let i = 1; i <= 12; i++) {
+      const mPayments = paymentsDB.filter(p => p.year === year && p.month === i);
+      const mUsages = usages.filter(u => u.year === year && u.month === i);
+
+      let mAir = 0, mBeban = 0, mCicilan = 0;
+      mPayments.forEach(p => {
+        mAir += (p.amountAir || 0);
+        mBeban += (p.amountBeban || 0);
+        mCicilan += (p.amountCicilan || 0);
       });
-      
-      // Calculate tunggakan (piutang air)
-      const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
-      usages.forEach(u => {
-          const hasPaid = payments.find(p => p.memberId === u.memberId && p.month === u.month);
-          if(!hasPaid) {
-              bulanan[u.month].piutang += (u.volume * rate); // simplified, only air
-          }
-      });
-      
-      const tbody = document.getElementById('lapTbody');
-      let html = '';
-      for(let i=1; i<=12; i++) {
-         const m = bulanan[i];
-         const tot = m.air + m.beban + m.cicilan;
-         html += `
+
+      // Piutang = billed but unpaid members
+      const billedCount = mUsages.length;
+      const paidCount = mPayments.length;
+      const unpaidCount = billedCount - paidCount;
+      const avgBill = billedCount > 0 ? (mUsages.reduce((s, u) => s + u.volume, 0) / billedCount) * rate + adminFee : 0;
+      const piutang = unpaidCount > 0 ? unpaidCount * avgBill : 0;
+
+      const tot = mAir + mBeban + mCicilan;
+      totals.air += mAir;
+      totals.beban += mBeban;
+      totals.cicilan += mCicilan;
+      totals.grandTotal += tot;
+
+      html += `
+             <tr>
+               <td class="text-left">${new Date(0, i - 1).toLocaleString('id-ID', { month: 'long' })}</td>
+               <td>${formatRp(mAir)}</td>
+               <td>${formatRp(mBeban)}</td>
+               <td class="text-info">${formatRp(mCicilan)}</td>
+               <td class="text-success font-bold">${formatRp(tot)}</td>
+               <td class="text-danger">${formatRp(piutang)}</td>
+             </tr>
+           `;
+    }
+    tbody.innerHTML = html;
+
+    document.getElementById('lapTfoot').innerHTML = `
            <tr>
-             <td class="text-left">${new Date(0, i-1).toLocaleString('id-ID', {month:'long'})}</td>
-             <td>${formatRp(m.air)}</td>
-             <td>${formatRp(m.beban)}</td>
-             <td class="text-info">${formatRp(m.cicilan)}</td>
-             <td class="text-success font-bold">${formatRp(tot)}</td>
-             <td class="text-danger">${formatRp(m.piutang)}</td>
+              <td class="text-left">TOTAL ${year}</td>
+              <td>${formatRp(totals.air)}</td>
+              <td>${formatRp(totals.beban)}</td>
+              <td class="text-info">${formatRp(totals.cicilan)}</td>
+              <td class="text-success font-bold text-lg">${formatRp(totals.grandTotal)}</td>
+              <td>-</td>
            </tr>
-         `;
-      }
-      tbody.innerHTML = html;
-      
-      document.getElementById('lapTfoot').innerHTML = `
-         <tr>
-            <td class="text-left">TOTAL ${year}</td>
-            <td>${formatRp(totAir)}</td>
-            <td>${formatRp(totBeban)}</td>
-            <td class="text-info">${formatRp(totCicilan)}</td>
-            <td class="text-success font-bold text-lg">${formatRp(totAir + totBeban + totCicilan)}</td>
-            <td>-</td>
-         </tr>
-      `;
-      
-      document.getElementById('lapSummaryCards').innerHTML = `
-          <div class="card kpi-card">
-              <div class="kpi-title">Total Pendapatan (Air + Beban)</div>
-              <div class="kpi-value">${formatRp(totAir + totBeban)}</div>
-          </div>
-          <div class="card kpi-card border-info">
-              <div class="kpi-title text-info">Total Cicilan Diterima</div>
-              <div class="kpi-value text-info">${formatRp(totCicilan)}</div>
-          </div>
-          <div class="card kpi-card" style="background:var(--gradient-brand)">
-              <div class="kpi-title text-white">GRAND TOTAL KAS MASUK</div>
-              <div class="kpi-value text-white">${formatRp(totAir + totBeban + totCicilan)}</div>
-          </div>
-      `;
+        `;
+
+    document.getElementById('lapSummaryCards').innerHTML = `
+            <div class="card kpi-card">
+                <div class="kpi-title">Total Pendapatan (Air + Beban)</div>
+                <div class="kpi-value">${formatRp(totals.air + totals.beban)}</div>
+            </div>
+            <div class="card kpi-card border-info">
+                <div class="kpi-title text-info">Total Cicilan Diterima</div>
+                <div class="kpi-value text-info">${formatRp(totals.cicilan)}</div>
+            </div>
+            <div class="card kpi-card" style="background:var(--gradient-brand)">
+                <div class="kpi-title text-white">GRAND TOTAL KAS MASUK</div>
+                <div class="kpi-value text-white">${formatRp(totals.grandTotal)}</div>
+            </div>
+        `;
   };
-  
+
   document.getElementById('btnLapRefresh').onclick = () => {
-      state.year = Number(document.getElementById('lapYear').value);
-      loadLaporan();
+    state.year = Number(document.getElementById('lapYear').value);
+    loadLaporan();
   };
-  
+
   loadLaporan();
 }
 
 function renderAdminPetugas(container) {
   updateTopbarTitle('Manajemen Petugas Lapangan');
   const users = getDB(STORAGE.users);
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in">
        <div class="flex justify-between items-center mb-4">
@@ -2119,15 +2599,15 @@ function renderAdminPetugas(container) {
        </div>
     </div>
   `;
-  
+
   const loadPetugas = () => {
-      const tbody = document.getElementById('petugasTbody');
-      if(users.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Belum ada akun petugas dibuat.</td></tr>`;
-          return;
-      }
-      
-      tbody.innerHTML = users.map(u => `
+    const tbody = document.getElementById('petugasTbody');
+    if (users.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Belum ada akun petugas dibuat.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = users.map(u => `
          <tr>
             <td><span class="badge badge-info">${u.username}</span></td>
             <td class="font-bold">${u.name}</td>
@@ -2138,46 +2618,46 @@ function renderAdminPetugas(container) {
          </tr>
       `).join('');
   };
-  
+
   document.getElementById('btnAdminAddPetugas').onclick = () => {
-      const name = prompt('Masukkan Nama Lengkap Petugas:');
-      if(!name) return;
-      const username = prompt('Masukkan Username untuk Login:');
-      if(!username) return;
-      if(users.find(u => u.username === username)) return showToast('Username sudah dipakai!', 'error');
-      
-      const password = prompt('Masukkan Password:');
-      if(!password) return;
-      
-      users.push({ username, name, password, role: 'petugas' });
-      saveDB(STORAGE.users, users);
-      
-      logAction('tambah_petugas', `Menambahkan petugas baru: ${name}`);
-      showToast('Petugas berhasil ditambahkan');
-      loadPetugas();
+    const name = prompt('Masukkan Nama Lengkap Petugas:');
+    if (!name) return;
+    const username = prompt('Masukkan Username untuk Login:');
+    if (!username) return;
+    if (users.find(u => u.username === username)) return showToast('Username sudah dipakai!', 'error');
+
+    const password = prompt('Masukkan Password:');
+    if (!password) return;
+
+    users.push({ username, name, password, role: 'petugas' });
+    saveDB(STORAGE.users, users);
+
+    logAction('tambah_petugas', `Menambahkan petugas baru: ${name}`);
+    showToast('Petugas berhasil ditambahkan');
+    loadPetugas();
   };
-  
+
   window.deletePetugas = (username) => {
-      if(username === 'admin') return showToast('Tidak dapat menghapus super admin', 'error');
-      if(!confirm(`Hapus akses login untuk ${username}?`)) return;
-      
-      const newUsers = getDB(STORAGE.users).filter(u => u.username !== username);
-      saveDB(STORAGE.users, newUsers);
-      
-      logAction('hapus_petugas', `Menghapus petugas: ${username}`);
-      showToast('Petugas dihapus');
-      renderAdminPetugas(container); // reload
+    if (username === 'admin') return showToast('Tidak dapat menghapus super admin', 'error');
+    if (!confirm(`Hapus akses login untuk ${username}?`)) return;
+
+    const newUsers = getDB(STORAGE.users).filter(u => u.username !== username);
+    saveDB(STORAGE.users, newUsers);
+
+    logAction('hapus_petugas', `Menghapus petugas: ${username}`);
+    showToast('Petugas dihapus');
+    renderAdminPetugas(container); // reload
   };
-  
+
   loadPetugas();
 }
 
 function renderAdminPengaturan(container) {
   updateTopbarTitle('Pengaturan Sistem');
-  
+
   const rate = Number(localStorage.getItem(STORAGE.rate)) || 2100;
   const adminFee = Number(localStorage.getItem(STORAGE.adminFee)) || 500;
-  
+
   container.innerHTML = `
     <div class="card animate-fade-in" style="max-width:600px;">
        <h3 class="mb-4"><i class="fas fa-cog text-info"></i> Pengaturan Harga & Biaya</h3>
@@ -2202,18 +2682,18 @@ function renderAdminPengaturan(container) {
        <button class="btn btn-outline text-danger border-danger mt-2" onclick="if(confirm('Yakin reset semua riwayat data? Aksi ini permanen.')) { localStorage.clear(); window.location.reload(); }"><i class="fas fa-trash"></i> Hapus Semua Data Sistem</button>
     </div>
   `;
-  
+
   document.getElementById('btnSaveSetting').onclick = () => {
-      const nr = Number(document.getElementById('setRate').value);
-      const nb = Number(document.getElementById('setBeban').value);
-      
-      if(nr < 0 || nb < 0) return showToast('Nilai tidak boleh negatif', 'error');
-      
-      localStorage.setItem(STORAGE.rate, nr);
-      localStorage.setItem(STORAGE.adminFee, nb);
-      
-      logAction('setting', `Update Harga Air: ${nr}, Beban: ${nb}`);
-      showToast('Pengaturan berhasil disimpan');
+    const nr = Number(document.getElementById('setRate').value);
+    const nb = Number(document.getElementById('setBeban').value);
+
+    if (nr < 0 || nb < 0) return showToast('Nilai tidak boleh negatif', 'error');
+
+    localStorage.setItem(STORAGE.rate, nr);
+    localStorage.setItem(STORAGE.adminFee, nb);
+
+    logAction('setting', `Update Harga Air: ${nr}, Beban: ${nb}`);
+    showToast('Pengaturan berhasil disimpan');
   };
 }
 
@@ -2221,24 +2701,24 @@ function renderAdminPengaturan(container) {
 // --- 6. VIEWS: PETUGAS LAPANGAN ---
 
 function renderPetugasTugas(container) {
-   updateTopbarTitle('Daftar Tugas Hari Ini');
-   
-   const now = new Date();
-   const month = now.getMonth() + 1;
-   const year = now.getFullYear();
-   
-   const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
-   const usages = getDB(STORAGE.usage).filter(u => u.year === year && u.month === month);
-   
-   const membersToRead = members.map(m => {
-       const hasRead = usages.find(u => u.memberId === m.id);
-       return { ...m, isDone: !!hasRead, readData: hasRead };
-   });
-   
-   const doneCount = membersToRead.filter(m => m.isDone).length;
-   const progress = members.length ? Math.round((doneCount / members.length) * 100) : 0;
-   
-   container.innerHTML = `
+  updateTopbarTitle('Daftar Tugas Hari Ini');
+
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  const members = getDB(STORAGE.members).filter(m => m.status !== 'nonaktif');
+  const usages = getDB(STORAGE.usage).filter(u => u.year === year && u.month === month);
+
+  const membersToRead = members.map(m => {
+    const hasRead = usages.find(u => u.memberId === m.id);
+    return { ...m, isDone: !!hasRead, readData: hasRead };
+  });
+
+  const doneCount = membersToRead.filter(m => m.isDone).length;
+  const progress = members.length ? Math.round((doneCount / members.length) * 100) : 0;
+
+  container.innerHTML = `
       <div class="card p-4 animate-fade-in" style="background:var(--surface);">
          <div class="flex justify-between items-center mb-2">
             <h3 class="m-0"><i class="fas fa-clipboard-check text-info"></i> Progress Pencatatan</h3>
@@ -2247,7 +2727,7 @@ function renderPetugasTugas(container) {
          <div class="progress-container">
             <div class="progress-bar" style="width:${progress}%; background:var(--gradient-brand);"></div>
          </div>
-         <p class="text-muted text-right m-0 mt-1" style="font-size:0.8rem;">Bulan ${now.toLocaleString('id-ID',{month:'long'})} ${year}</p>
+         <p class="text-muted text-right m-0 mt-1" style="font-size:0.8rem;">Bulan ${now.toLocaleString('id-ID', { month: 'long' })} ${year}</p>
       </div>
       
       <div class="flex gap-2 mb-4">
@@ -2263,26 +2743,26 @@ function renderPetugasTugas(container) {
       
       <div id="ptgList" style="display:flex; flex-direction:column; gap:12px;"></div>
    `;
-   
-   const renderList = () => {
-       const search = document.getElementById('ptgSearch').value.toLowerCase();
-       const fStatus = document.getElementById('ptgFilterStatus').value;
-       
-       let filtered = membersToRead.filter(m => {
-           const matchesSearch = (m.fullName + ' ' + m.id + ' ' + m.zone).toLowerCase().includes(search);
-           let matchesStatus = true;
-           if(fStatus === 'belum') matchesStatus = !m.isDone;
-           if(fStatus === 'selesai') matchesStatus = m.isDone;
-           return matchesSearch && matchesStatus;
-       });
-       
-       const list = document.getElementById('ptgList');
-       if(filtered.length === 0) {
-           list.innerHTML = `<div class="card text-center text-muted p-4">Semua tugas pada kategori ini sudah selesai! 🎉</div>`;
-           return;
-       }
-       
-       list.innerHTML = filtered.map(m => `
+
+  const renderList = () => {
+    const search = document.getElementById('ptgSearch').value.toLowerCase();
+    const fStatus = document.getElementById('ptgFilterStatus').value;
+
+    let filtered = membersToRead.filter(m => {
+      const matchesSearch = (m.fullName + ' ' + m.id + ' ' + m.zone).toLowerCase().includes(search);
+      let matchesStatus = true;
+      if (fStatus === 'belum') matchesStatus = !m.isDone;
+      if (fStatus === 'selesai') matchesStatus = m.isDone;
+      return matchesSearch && matchesStatus;
+    });
+
+    const list = document.getElementById('ptgList');
+    if (filtered.length === 0) {
+      list.innerHTML = `<div class="card text-center text-muted p-4">Semua tugas pada kategori ini sudah selesai! 🎉</div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(m => `
            <div class="card" style="padding:15px; border-left:4px solid ${m.isDone ? 'var(--accent-success)' : 'var(--accent-primary)'}; margin-bottom:0;">
               <div class="flex justify-between items-center mb-2">
                  <span class="badge badge-info">${m.id}</span>
@@ -2292,44 +2772,44 @@ function renderPetugasTugas(container) {
               <p class="text-muted m-0"><i class="fas fa-map-marker-alt"></i> ${m.zone} - ${m.address}</p>
               
               <div class="mt-3">
-                 ${m.isDone 
-                   ? `<div class="flex justify-between items-center" style="background:var(--surface); padding:10px; border-radius:6px;">
+                 ${m.isDone
+        ? `<div class="flex justify-between items-center" style="background:var(--surface); padding:10px; border-radius:6px;">
                         <span>Angka Meteran:</span>
                         <b class="text-success">${m.readData.currentReading} m³</b>
                       </div>`
-                   : `<button class="btn btn-primary w-full" onclick="window.location.hash='#formcatat-${m.id}'"><i class="fas fa-edit"></i> Catat Sekarang</button>`
-                 }
+        : `<button class="btn btn-primary w-full" onclick="window.location.hash='#formcatat-${m.id}'"><i class="fas fa-edit"></i> Catat Sekarang</button>`
+      }
               </div>
            </div>
        `).join('');
-   };
-   
-   document.getElementById('ptgSearch').addEventListener('input', renderList);
-   document.getElementById('ptgFilterStatus').addEventListener('change', renderList);
-   
-   renderList();
+  };
+
+  document.getElementById('ptgSearch').addEventListener('input', renderList);
+  document.getElementById('ptgFilterStatus').addEventListener('change', renderList);
+
+  renderList();
 }
 
 // Special Route specifically for the input form
 function renderPetugasFormCatat(container, memberId) {
-   updateTopbarTitle('Form Pencatatan Meteran');
-   const member = getDB(STORAGE.members).find(m => m.id === memberId);
-   if(!member) return window.location.hash = '#tugas';
-   
-   const now = new Date();
-   const month = now.getMonth() + 1;
-   const year = now.getFullYear();
-   
-   // Calculate previous usage
-   const usages = getDB(STORAGE.usage).filter(u => u.memberId === memberId).sort((a,b) => {
-       if(a.year !== b.year) return a.year - b.year;
-       return a.month - b.month;
-   });
-   
-   const lastUsage = usages.length > 0 ? usages[usages.length - 1] : null;
-   const prevReading = lastUsage ? lastUsage.currentReading : 0;
-   
-   container.innerHTML = `
+  updateTopbarTitle('Form Pencatatan Meteran');
+  const member = getDB(STORAGE.members).find(m => m.id === memberId);
+  if (!member) return window.location.hash = '#tugas';
+
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  // Calculate previous usage
+  const usages = getDB(STORAGE.usage).filter(u => u.memberId === memberId).sort((a, b) => {
+    if (a.year !== b.year) return a.year - b.year;
+    return a.month - b.month;
+  });
+
+  const lastUsage = usages.length > 0 ? usages[usages.length - 1] : null;
+  const prevReading = lastUsage ? lastUsage.currentReading : 0;
+
+  container.innerHTML = `
       <div style="max-width:500px; margin: 0 auto;">
          <button class="btn btn-outline mb-4" onclick="window.location.hash='#tugas'"><i class="fas fa-arrow-left"></i> Kembali</button>
          
@@ -2373,115 +2853,115 @@ function renderPetugasFormCatat(container, memberId) {
          </div>
       </div>
    `;
-   
-   let base64Photo = null;
-   
-   // Logic estimation
-   document.getElementById('inpCurrent').addEventListener('input', (e) => {
-       const cur = Number(e.target.value);
-       const warn = document.getElementById('volumeWarning');
-       const est = document.getElementById('txtEstPemakaian');
-       
-       if (cur < prevReading) {
-           warn.style.display = 'block';
-           est.innerText = '0 m³';
-           est.classList.remove('text-info');
-           est.classList.add('text-danger');
-       } else {
-           warn.style.display = 'none';
-           est.innerText = (cur - prevReading) + ' m³';
-           est.classList.add('text-info');
-           est.classList.remove('text-danger');
-       }
-   });
-   
-   // Handle Photo
-   document.getElementById('inpPhoto').addEventListener('change', (e) => {
-       const file = e.target.files[0];
-       if(!file) return;
-       
-       const reader = new FileReader();
-       reader.onload = (event) => {
-           base64Photo = event.target.result;
-           const img = document.getElementById('imgPreview');
-           img.src = base64Photo;
-           img.style.display = 'block';
-           document.querySelector('#photoArea i').style.display = 'none';
-           document.querySelector('#photoArea span').style.display = 'none';
-       };
-       reader.readAsDataURL(file);
-   });
-   
-   // Submit handling
-   document.getElementById('formCatatMeteran').onsubmit = (e) => {
-       e.preventDefault();
-       const cur = Number(document.getElementById('inpCurrent').value);
-       if(cur < prevReading) return showToast('Angka saat ini tidak boleh kurang dari angka bulan lalu!', 'error');
-       
-       const vol = cur - prevReading;
-       
-       const usageDB = getDB(STORAGE.usage);
-       usageDB.push({
-           id: `${memberId}-${year}-${month}`,
-           memberId: memberId,
-           year: year,
-           month: month,
-           prevReading: prevReading,
-           currentReading: cur,
-           volume: vol,
-           photoData: base64Photo, // Base64 string
-           officerId: getSession().username,
-           timestamp: new Date().toISOString()
-       });
-       
-       saveDB(STORAGE.usage, usageDB);
-       logAction('catat', `Mencatat meteran ${memberId} (${vol} m³)`);
-       showToast('Data pencatatan berhasil disimpan!');
-       window.location.hash = '#tugas';
-   };
+
+  let base64Photo = null;
+
+  // Logic estimation
+  document.getElementById('inpCurrent').addEventListener('input', (e) => {
+    const cur = Number(e.target.value);
+    const warn = document.getElementById('volumeWarning');
+    const est = document.getElementById('txtEstPemakaian');
+
+    if (cur < prevReading) {
+      warn.style.display = 'block';
+      est.innerText = '0 m³';
+      est.classList.remove('text-info');
+      est.classList.add('text-danger');
+    } else {
+      warn.style.display = 'none';
+      est.innerText = (cur - prevReading) + ' m³';
+      est.classList.add('text-info');
+      est.classList.remove('text-danger');
+    }
+  });
+
+  // Handle Photo
+  document.getElementById('inpPhoto').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      base64Photo = event.target.result;
+      const img = document.getElementById('imgPreview');
+      img.src = base64Photo;
+      img.style.display = 'block';
+      document.querySelector('#photoArea i').style.display = 'none';
+      document.querySelector('#photoArea span').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // Submit handling
+  document.getElementById('formCatatMeteran').onsubmit = (e) => {
+    e.preventDefault();
+    const cur = Number(document.getElementById('inpCurrent').value);
+    if (cur < prevReading) return showToast('Angka saat ini tidak boleh kurang dari angka bulan lalu!', 'error');
+
+    const vol = cur - prevReading;
+
+    const usageDB = getDB(STORAGE.usage);
+    usageDB.push({
+      id: `${memberId}-${year}-${month}`,
+      memberId: memberId,
+      year: year,
+      month: month,
+      prevReading: prevReading,
+      currentReading: cur,
+      volume: vol,
+      photoData: base64Photo, // Base64 string
+      officerId: getSession().username,
+      timestamp: new Date().toISOString()
+    });
+
+    saveDB(STORAGE.usage, usageDB);
+    logAction('catat', `Mencatat meteran ${memberId} (${vol} m³)`);
+    showToast('Data pencatatan berhasil disimpan!');
+    window.location.hash = '#tugas';
+  };
 }
 
 // Override routing temporarily for the special dynamic route #formcatat-XXX
 const originalHandleRoute = handleRoute;
-window.handleRoute = function() {
-    const hash = window.location.hash;
-    const session = getSession();
-    if (session && session.role === 'petugas' && hash.startsWith('#formcatat-')) {
-        let contentArea = document.getElementById('main-content-area');
-        if (!contentArea) {
-           renderAppLayout(session);
-           contentArea = document.getElementById('main-content-area');
-        }
-        const memberId = hash.replace('#formcatat-', '');
-        renderPetugasFormCatat(contentArea, memberId);
-    } else {
-        originalHandleRoute();
+window.handleRoute = function () {
+  const hash = window.location.hash;
+  const session = getSession();
+  if (session && session.role === 'petugas' && hash.startsWith('#formcatat-')) {
+    let contentArea = document.getElementById('main-content-area');
+    if (!contentArea) {
+      renderAppLayout(session);
+      contentArea = document.getElementById('main-content-area');
     }
+    const memberId = hash.replace('#formcatat-', '');
+    renderPetugasFormCatat(contentArea, memberId);
+  } else {
+    originalHandleRoute();
+  }
 };
 
 function renderPetugasPasang(container) {
-   updateTopbarTitle('Tugas Pemasangan Baru (SPK)');
-   
-   const spks = getDB(STORAGE.spk).filter(s => s.status === 'pending');
-   const members = getDB(STORAGE.members);
-   
-   if (spks.length === 0) {
-      container.innerHTML = `<div class="card animate-fade-in text-center p-6"><i class="fas fa-check-circle text-success" style="font-size:3rem; margin-bottom:15px;"></i><h3>Tidak ada tugas pemasangan</h3><p class="text-muted">Semua SPK sudah diselesaikan.</p></div>`;
-      return;
-   }
-   
-   container.innerHTML = `
+  updateTopbarTitle('Tugas Pemasangan Baru (SPK)');
+
+  const spks = getDB(STORAGE.spk).filter(s => s.status === 'pending');
+  const members = getDB(STORAGE.members);
+
+  if (spks.length === 0) {
+    container.innerHTML = `<div class="card animate-fade-in text-center p-6"><i class="fas fa-check-circle text-success" style="font-size:3rem; margin-bottom:15px;"></i><h3>Tidak ada tugas pemasangan</h3><p class="text-muted">Semua SPK sudah diselesaikan.</p></div>`;
+    return;
+  }
+
+  container.innerHTML = `
       <div class="animate-fade-in" style="display:grid; gap:15px;" id="listSpk">
          ${spks.map(s => {
-             const m = members.find(x => x.id === s.memberId);
-             return `
+    const m = members.find(x => x.id === s.memberId);
+    return `
                <div class="card" style="border-left:4px solid var(--accent-warning);">
                   <div class="flex justify-between mb-2">
                      <span class="badge badge-warning">SPK Baru</span>
                      <b class="text-primary">${s.id}</b>
                   </div>
-                  <h3 class="m-0">${m?m.fullName:'Unknown'} (${s.memberId})</h3>
-                  <p class="text-muted mt-1 mb-4"><i class="fas fa-map-marker-alt"></i> ${m?m.address:'-'} - ${m?m.zone:'-'}</p>
+                  <h3 class="m-0">${m ? m.fullName : 'Unknown'} (${s.memberId})</h3>
+                  <p class="text-muted mt-1 mb-4"><i class="fas fa-map-marker-alt"></i> ${m ? m.address : '-'} - ${m ? m.zone : '-'}</p>
                   
                   <div style="background:var(--surface); padding:15px; border-radius:var(--radius-md);">
                      <p class="font-bold text-sm mb-2"><i class="fas fa-wrench"></i> Input Data Penyelesaian</p>
@@ -2492,40 +2972,40 @@ function renderPetugasPasang(container) {
                   </div>
                </div>
              `;
-         }).join('')}
+  }).join('')}
       </div>
    `;
-   
-   window.selesaikanSpk = (spkId) => {
-       const sn = document.getElementById(`sn-${spkId}`).value.trim();
-       if(!sn) return showToast('Nomor seri meteran wajib diisi!', 'error');
-       
-       if(!confirm('Konfirmasi pemasangan telah selesai dan meteran sudah berjalan?')) return;
-       
-       const spkDB = getDB(STORAGE.spk);
-       const idx = spkDB.findIndex(x => x.id === spkId);
-       if(idx > -1) {
-           spkDB[idx].status = 'installed';
-           spkDB[idx].serialNumber = sn;
-           spkDB[idx].installedAt = new Date().toISOString();
-           spkDB[idx].officerId = getSession().username;
-           saveDB(STORAGE.spk, spkDB);
-           
-           logAction('pasang', `Menyelesaikan SPK ${spkId} (SN: ${sn})`);
-           showToast('SPK berhasil diselesaikan!');
-           renderPetugasPasang(container); // reload
-       }
-   };
+
+  window.selesaikanSpk = (spkId) => {
+    const sn = document.getElementById(`sn-${spkId}`).value.trim();
+    if (!sn) return showToast('Nomor seri meteran wajib diisi!', 'error');
+
+    if (!confirm('Konfirmasi pemasangan telah selesai dan meteran sudah berjalan?')) return;
+
+    const spkDB = getDB(STORAGE.spk);
+    const idx = spkDB.findIndex(x => x.id === spkId);
+    if (idx > -1) {
+      spkDB[idx].status = 'installed';
+      spkDB[idx].serialNumber = sn;
+      spkDB[idx].installedAt = new Date().toISOString();
+      spkDB[idx].officerId = getSession().username;
+      saveDB(STORAGE.spk, spkDB);
+
+      logAction('pasang', `Menyelesaikan SPK ${spkId} (SN: ${sn})`);
+      showToast('SPK berhasil diselesaikan!');
+      renderPetugasPasang(container); // reload
+    }
+  };
 }
 
 function renderPetugasRiwayat(container) {
-   updateTopbarTitle('Riwayat Tugas Saya');
-   const myUsername = getSession().username;
-   
-   const usages = getDB(STORAGE.usage).filter(u => u.officerId === myUsername).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-   const spks = getDB(STORAGE.spk).filter(s => s.officerId === myUsername).sort((a,b) => new Date(b.installedAt) - new Date(a.installedAt));
-   
-   container.innerHTML = `
+  updateTopbarTitle('Riwayat Tugas Saya');
+  const myUsername = getSession().username;
+
+  const usages = getDB(STORAGE.usage).filter(u => u.officerId === myUsername).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const spks = getDB(STORAGE.spk).filter(s => s.officerId === myUsername).sort((a, b) => new Date(b.installedAt) - new Date(a.installedAt));
+
+  container.innerHTML = `
       <div class="kpi-grid animate-fade-in mb-6">
          <div class="card kpi-card">
             <div class="kpi-title">Total Mencatat Meteran</div>
@@ -2568,7 +3048,18 @@ function renderPetugasRiwayat(container) {
 
 // --- INIT APP LAUNCHER ---
 window.addEventListener('hashchange', handleRoute);
-window.addEventListener('DOMContentLoaded', () => {
-    initStorage();
-    handleRoute();
+window.addEventListener('DOMContentLoaded', async () => {
+  initStorage();
+  const s = await apiGetSession();
+  if (s && s.user) {
+    setSession({
+      username: s.user.username,
+      email: s.user.email,
+      role: s.user.role,
+      name: s.user.name
+    });
+  } else {
+    clearSession();
+  }
+  handleRoute();
 });
